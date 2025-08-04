@@ -1,0 +1,7 @@
+aiohttp
+click
+pytest >= 8.1
+pytz
+types-python-dateutil
+types-pytz
+types-deprecated

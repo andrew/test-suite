@@ -1,6 +1,5 @@
 use sha1::{Sha1, Digest};
-use sha2::{Sha256, Digest as Sha256Digest};
-use crate::error::SwhidError;
+use sha2::Sha256;
 
 /// Git-style SHA1 hash computation
 pub fn sha1_git_hash(data: &[u8]) -> [u8; 20] {

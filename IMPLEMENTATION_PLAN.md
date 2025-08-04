@@ -1,0 +1,237 @@
+# SWHID Rust Implementation Plan
+
+## Current Status
+
+The Rust SWHID implementation has a solid foundation with:
+- ✅ Core SWHID structure and parsing
+- ✅ Content object handling
+- ✅ Directory object handling  
+- ✅ Basic hash utilities
+- ✅ CLI interface
+- ✅ Error handling
+
+## Missing Components
+
+### 1. Core Data Types (High Priority)
+
+#### Person Object
+```rust
+pub struct Person {
+    pub fullname: Vec<u8>,
+    pub name: Option<Vec<u8>>,
+    pub email: Option<Vec<u8>>,
+}
+```
+
+#### Timestamp Objects
+```rust
+pub struct Timestamp {
+    pub seconds: i64,
+    pub microseconds: u32,
+}
+
+pub struct TimestampWithTimezone {
+    pub timestamp: Timestamp,
+    pub offset_bytes: Vec<u8>,
+}
+```
+
+#### Revision Object
+```rust
+pub struct Revision {
+    pub message: Option<Vec<u8>>,
+    pub author: Option<Person>,
+    pub committer: Option<Person>,
+    pub date: Option<TimestampWithTimezone>,
+    pub committer_date: Option<TimestampWithTimezone>,
+    pub revision_type: RevisionType,
+    pub directory: [u8; 20],
+    pub synthetic: bool,
+    pub metadata: Option<HashMap<String, String>>,
+    pub parents: Vec<[u8; 20]>,
+    pub id: [u8; 20],
+    pub extra_headers: Vec<(Vec<u8>, Vec<u8>)>,
+    pub raw_manifest: Option<Vec<u8>>,
+}
+```
+
+#### Release Object
+```rust
+pub struct Release {
+    pub name: Vec<u8>,
+    pub message: Option<Vec<u8>>,
+    pub target: Option<[u8; 20]>,
+    pub target_type: ReleaseTargetType,
+    pub synthetic: bool,
+    pub author: Option<Person>,
+    pub date: Option<TimestampWithTimezone>,
+    pub metadata: Option<HashMap<String, String>>,
+    pub id: [u8; 20],
+    pub raw_manifest: Option<Vec<u8>>,
+}
+```
+
+#### Snapshot Object
+```rust
+pub struct Snapshot {
+    pub branches: HashMap<Vec<u8>, Option<SnapshotBranch>>,
+    pub id: [u8; 20],
+}
+
+pub struct SnapshotBranch {
+    pub target: [u8; 20],
+    pub target_type: SnapshotTargetType,
+}
+```
+
+### 2. Git Object Formatting (High Priority)
+
+#### Enhanced git_objects.rs
+- `revision_git_object()` - Format revision as git commit
+- `release_git_object()` - Format release as git tag
+- `snapshot_git_object()` - Format snapshot as git refs
+- `format_author_data()` - Format author/committer data
+- `format_date()` - Format timestamps
+
+#### Git Object Headers
+- Support for complex git object types
+- Proper header formatting with extra headers
+- Message handling
+
+### 3. SWHID Extensions (Medium Priority)
+
+#### Qualified SWHIDs
+```rust
+pub struct QualifiedSwhid {
+    pub core: Swhid,
+    pub origin: Option<String>,
+    pub visit: Option<Swhid>,
+    pub anchor: Option<Swhid>,
+    pub path: Option<Vec<u8>>,
+    pub lines: Option<(u32, Option<u32>)>,
+}
+```
+
+#### Extended SWHIDs
+- Support for Origin (`ori`) and Raw Extrinsic Metadata (`emd`) types
+- Extended object type enumeration
+
+### 4. Validation and Serialization (Medium Priority)
+
+#### Enhanced Validation
+- Comprehensive field validation
+- Cross-field validation (e.g., author/date consistency)
+- Type checking and conversion
+
+#### Serialization Support
+- JSON serialization/deserialization
+- Dictionary format support
+- From/To dict methods
+
+### 5. Advanced Features (Low Priority)
+
+#### Merkle Tree Support
+- Merkle leaf/node abstractions
+- Tree traversal utilities
+
+#### Discovery and Collections
+- Origin discovery
+- Object collection utilities
+
+#### CLI Enhancements
+- Better error reporting
+- Progress indicators
+- Configuration options
+- Batch processing
+
+## Implementation Order
+
+### Phase 1: Core Data Types
+1. Implement `Person` struct with validation
+2. Implement `Timestamp` and `TimestampWithTimezone`
+3. Implement `Revision` struct with git object formatting
+4. Implement `Release` struct with git object formatting
+5. Implement `Snapshot` struct with git object formatting
+
+### Phase 2: Git Object Formatting
+1. Enhance `git_objects.rs` with complete git object support
+2. Implement author data formatting
+3. Implement date formatting
+4. Add comprehensive tests for git object compatibility
+
+### Phase 3: SWHID Extensions
+1. Implement `QualifiedSwhid` with qualifier parsing
+2. Implement `ExtendedSwhid` with extended object types
+3. Add qualifier validation and formatting
+
+### Phase 4: Validation and Serialization
+1. Add comprehensive validation
+2. Implement JSON serialization
+3. Add dictionary format support
+
+### Phase 5: Advanced Features
+1. Merkle tree abstractions
+2. Discovery utilities
+3. CLI enhancements
+
+## Testing Strategy
+
+### Unit Tests
+- Each data type should have comprehensive unit tests
+- Git object formatting should be tested against known outputs
+- SWHID parsing should be tested with various inputs
+
+### Integration Tests
+- Test compatibility with Python implementation
+- Test real-world git repositories
+- Test edge cases and error conditions
+
+### Compatibility Tests
+- Generate SWHIDs for the same content in both Python and Rust
+- Verify identical hash outputs
+- Test parsing of SWHIDs generated by Python implementation
+
+## Files to Create/Modify
+
+### New Files
+- `src/person.rs` - Person object implementation
+- `src/timestamp.rs` - Timestamp implementations
+- `src/revision.rs` - Revision object implementation
+- `src/release.rs` - Release object implementation
+- `src/snapshot.rs` - Snapshot object implementation
+- `src/qualified_swhid.rs` - Qualified SWHID implementation
+- `src/extended_swhid.rs` - Extended SWHID implementation
+
+### Files to Enhance
+- `src/git_objects.rs` - Complete git object formatting
+- `src/swhid.rs` - Add extended object types
+- `src/lib.rs` - Export new types and functions
+- `src/error.rs` - Add new error types
+- `src/main.rs` - Enhanced CLI functionality
+
+## Dependencies to Add
+
+```toml
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+```
+
+## Success Criteria
+
+1. **Compatibility**: Generate identical SWHIDs to Python implementation
+2. **Completeness**: Support all core SWHID object types
+3. **Performance**: Significantly faster than Python implementation
+4. **Reliability**: Comprehensive test coverage
+5. **Usability**: Intuitive API and CLI interface
+
+## Timeline Estimate
+
+- **Phase 1**: 2-3 weeks
+- **Phase 2**: 1-2 weeks  
+- **Phase 3**: 1-2 weeks
+- **Phase 4**: 1 week
+- **Phase 5**: 1-2 weeks
+
+**Total**: 6-10 weeks for complete implementation 

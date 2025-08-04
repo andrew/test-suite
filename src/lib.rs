@@ -1,7 +1,4 @@
-use std::collections::HashMap;
 use std::path::Path;
-use sha1::{Sha1, Digest};
-use hex;
 
 pub mod swhid;
 pub mod hash;
@@ -9,9 +6,14 @@ pub mod git_objects;
 pub mod directory;
 pub mod content;
 pub mod error;
+pub mod person;
+pub mod timestamp;
 
 pub use swhid::{Swhid, ObjectType};
 pub use error::SwhidError;
+pub use person::Person;
+pub use timestamp::{Timestamp, TimestampWithTimezone};
+pub use directory::{TreeObject, traverse_directory_recursively};
 
 /// Main entry point for computing SWHIDs
 pub struct SwhidComputer {

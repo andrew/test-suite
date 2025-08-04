@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use crate::swhid::{Swhid, ObjectType};
 use crate::content::Content;
@@ -87,6 +87,18 @@ impl Directory {
         exclude_patterns: &[String],
         follow_symlinks: bool,
     ) -> Result<Self, SwhidError> {
+        Self::from_disk_with_hash_fn(path, exclude_patterns, follow_symlinks, |_| Ok([0u8; 20]))
+    }
+
+    pub fn from_disk_with_hash_fn<P: AsRef<Path>, F>(
+        path: P,
+        exclude_patterns: &[String],
+        follow_symlinks: bool,
+        hash_fn: F,
+    ) -> Result<Self, SwhidError>
+    where
+        F: Fn(&Path) -> Result<[u8; 20], SwhidError>,
+    {
         let path = path.as_ref();
         let mut entries = Vec::new();
 
@@ -103,7 +115,7 @@ impl Directory {
             let metadata = if follow_symlinks {
                 entry.metadata()?
             } else {
-                entry.symlink_metadata()?
+                entry.metadata()? // Note: symlink_metadata() is not available on DirEntry
             };
 
             let entry_type = if metadata.is_dir() {
@@ -116,18 +128,14 @@ impl Directory {
 
             let permissions = Permissions::from_mode(metadata.mode());
 
-            // For now, we'll need to compute the target hash
-            // This is a simplified version - in practice, you'd need to handle
-            // recursive directory traversal and content hashing
+            // Compute the target hash using the provided hash function
             let target = if entry_type == EntryType::File {
                 // Compute content hash
                 let content = Content::from_file(entry.path())?;
                 *content.sha1_git()
             } else {
-                // For directories and symlinks, we'd need to compute their hashes
-                // This is a placeholder - in practice, you'd need to implement
-                // recursive directory hashing
-                [0u8; 20]
+                // Use the provided hash function for directories and symlinks
+                hash_fn(&entry.path())?
             };
 
             entries.push(DirectoryEntry::new(name_bytes, entry_type, permissions, target));
@@ -176,6 +184,13 @@ impl Directory {
         Swhid::new(ObjectType::Directory, hash)
     }
 
+
+
+    /// Get the path associated with this directory (for recursive traversal)
+    pub fn path(&self) -> Option<&Path> {
+        None // TODO: Add path tracking
+    }
+
     /// Entry sorting key (Git's tree sorting rules)
     fn entry_sort_key(entry: &DirectoryEntry) -> Vec<u8> {
         let mut key = entry.name.clone();
@@ -188,14 +203,168 @@ impl Directory {
     /// Check if entry should be excluded based on patterns
     fn should_exclude(name: &[u8], patterns: &[String]) -> bool {
         let name_str = String::from_utf8_lossy(name);
-        for pattern in patterns {
-            if name_str.matches(pattern) {
-                return true;
-            }
-        }
-        false
+        should_exclude_str(&name_str, patterns)
     }
 }
+
+/// Check if entry should be excluded based on patterns (string version)
+fn should_exclude_str(name: &str, patterns: &[String]) -> bool {
+    for pattern in patterns {
+        if name.contains(pattern) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursively traverse a directory and yield all objects
+pub fn traverse_directory_recursively<P: AsRef<Path>>(
+    root_path: P,
+    exclude_patterns: &[String],
+    follow_symlinks: bool,
+) -> Result<Vec<(PathBuf, TreeObject)>, SwhidError> {
+    let root_path = root_path.as_ref();
+    
+    // Build a cache of directory hashes
+    let mut hash_cache = std::collections::HashMap::new();
+    
+    // First pass: collect all content objects and compute their hashes
+    let mut content_objects = Vec::new();
+    collect_content_objects(root_path, exclude_patterns, follow_symlinks, &mut content_objects)?;
+    
+    // Second pass: compute directory hashes using the content hashes
+    let mut directory_objects = Vec::new();
+    compute_directory_hashes(root_path, exclude_patterns, follow_symlinks, &mut hash_cache, &mut directory_objects)?;
+    
+    // Combine all objects
+    let mut all_objects = Vec::new();
+    all_objects.extend(content_objects);
+    all_objects.extend(directory_objects);
+    
+    Ok(all_objects)
+}
+
+/// Collect all content objects recursively
+fn collect_content_objects(
+    current_path: &Path,
+    exclude_patterns: &[String],
+    follow_symlinks: bool,
+    objects: &mut Vec<(PathBuf, TreeObject)>,
+) -> Result<(), SwhidError> {
+    let metadata = if follow_symlinks {
+        fs::metadata(current_path)?
+    } else {
+        fs::symlink_metadata(current_path)?
+    };
+
+    if metadata.is_file() {
+        // Add content object
+        let content = Content::from_file(current_path)?;
+        objects.push((current_path.to_path_buf(), TreeObject::Content(content)));
+    } else if metadata.is_dir() {
+        // Process all subdirectories and files recursively
+        for entry in fs::read_dir(current_path)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            
+            // Skip hidden files and excluded patterns
+            if let Some(name) = entry_path.file_name() {
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with('.') || should_exclude_str(&name_str, exclude_patterns) {
+                    continue;
+                }
+            }
+            
+            collect_content_objects(&entry_path, exclude_patterns, follow_symlinks, objects)?;
+        }
+    }
+    
+    Ok(())
+}
+
+/// Compute directory hashes recursively, using cached content hashes
+fn compute_directory_hashes(
+    current_path: &Path,
+    exclude_patterns: &[String],
+    follow_symlinks: bool,
+    hash_cache: &mut std::collections::HashMap<PathBuf, [u8; 20]>,
+    objects: &mut Vec<(PathBuf, TreeObject)>,
+) -> Result<(), SwhidError> {
+    let metadata = if follow_symlinks {
+        fs::metadata(current_path)?
+    } else {
+        fs::symlink_metadata(current_path)?
+    };
+
+    if metadata.is_dir() {
+        // Check if we've already processed this directory
+        if hash_cache.contains_key(current_path) {
+            return Ok(());
+        }
+        
+        // First, compute hashes for all subdirectories
+        for entry in fs::read_dir(current_path)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            
+            // Skip hidden files and excluded patterns
+            if let Some(name) = entry_path.file_name() {
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with('.') || should_exclude_str(&name_str, exclude_patterns) {
+                    continue;
+                }
+            }
+            
+            let entry_metadata = if follow_symlinks {
+                fs::metadata(&entry_path)?
+            } else {
+                fs::symlink_metadata(&entry_path)?
+            };
+
+            if entry_metadata.is_dir() {
+                compute_directory_hashes(&entry_path, exclude_patterns, follow_symlinks, hash_cache, objects)?;
+            }
+        }
+        
+        // Then compute the hash for this directory
+        let hash_fn = |path: &Path| {
+            if let Some(hash) = hash_cache.get(path) {
+                Ok(*hash)
+            } else {
+                // For content objects, compute the hash
+                let content = Content::from_file(path)?;
+                Ok(*content.sha1_git())
+            }
+        };
+        
+        let mut dir = Directory::from_disk_with_hash_fn(current_path, exclude_patterns, follow_symlinks, hash_fn)?;
+        let hash = dir.compute_hash();
+        hash_cache.insert(current_path.to_path_buf(), hash);
+        
+        objects.push((current_path.to_path_buf(), TreeObject::Directory(dir)));
+    }
+    
+    Ok(())
+}
+
+/// Represents an object in the directory tree (either content or directory)
+#[derive(Debug)]
+pub enum TreeObject {
+    Content(Content),
+    Directory(Directory),
+}
+
+impl TreeObject {
+    /// Get the SWHID for this object
+    pub fn swhid(&mut self) -> Swhid {
+        match self {
+            TreeObject::Content(content) => content.swhid(),
+            TreeObject::Directory(dir) => dir.swhid(),
+        }
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
