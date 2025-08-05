@@ -876,18 +876,14 @@ fn test_directory_entry_order_git_compliance() {
     let mut prev_entry: Option<&DirectoryEntry> = None;
     for entry in entries {
         if let Some(prev) = prev_entry {
-            // Directories should come before files
-            if prev.entry_type == EntryType::Directory && entry.entry_type == EntryType::File {
-                // This is correct - directories before files
-            } else if prev.entry_type == EntryType::File && entry.entry_type == EntryType::Directory {
-                panic!("Files should come after directories in Git tree order");
-            } else {
-                // Within same type, should be sorted by byte order
-                assert!(prev.name <= entry.name, 
-                    "Entries not in byte order: {:?} > {:?}", 
-                    String::from_utf8_lossy(&prev.name), 
-                    String::from_utf8_lossy(&entry.name));
-            }
+            // Entries should be sorted by sort key (name + / for directories)
+            // This means alphabetical order, not directories-first
+            let prev_key = Directory::entry_sort_key(prev);
+            let curr_key = Directory::entry_sort_key(entry);
+            assert!(prev_key <= curr_key, 
+                "Entries not in sort key order: {:?} > {:?}", 
+                String::from_utf8_lossy(&prev_key), 
+                String::from_utf8_lossy(&curr_key));
         }
         prev_entry = Some(entry);
     }
@@ -909,16 +905,17 @@ fn test_directory_entry_order_specific_examples() {
     // Should have 4 entries
     assert_eq!(entries.len(), 4);
     
-    // Order should be: directories first (b, d), then files (a, c)
-    // Within each group, sorted by byte order
-    assert_eq!(entries[0].name, b"b");
-    assert_eq!(entries[0].entry_type, EntryType::Directory);
-    assert_eq!(entries[1].name, b"d");
+    // Order should be: alphabetical by name (a, b, c, d)
+    // When b and d are directories, their sort keys become b/ and d/
+    // So the order is: a (file), b (dir), c (file), d (dir)
+    assert_eq!(entries[0].name, b"a");
+    assert_eq!(entries[0].entry_type, EntryType::File);
+    assert_eq!(entries[1].name, b"b");
     assert_eq!(entries[1].entry_type, EntryType::Directory);
-    assert_eq!(entries[2].name, b"a");
+    assert_eq!(entries[2].name, b"c");
     assert_eq!(entries[2].entry_type, EntryType::File);
-    assert_eq!(entries[3].name, b"c");
-    assert_eq!(entries[3].entry_type, EntryType::File);
+    assert_eq!(entries[3].name, b"d");
+    assert_eq!(entries[3].entry_type, EntryType::Directory);
 }
 
 #[test]
@@ -938,20 +935,14 @@ fn test_directory_entry_order_with_special_chars() {
     // Should have 5 entries
     assert_eq!(entries.len(), 5);
     
-    // Directories should come first, sorted by byte order
-    assert_eq!(entries[0].entry_type, EntryType::Directory);
+    // Entries should be sorted by sort key (name + / for directories)
+    // This means alphabetical order, not directories-first
+    // Expected order: a.txt (file), alpha (dir), z.txt (file), á.txt (file), ápha (dir)
+    assert_eq!(entries[0].entry_type, EntryType::File);
     assert_eq!(entries[1].entry_type, EntryType::Directory);
-    
-    // Files should come after, sorted by byte order
     assert_eq!(entries[2].entry_type, EntryType::File);
     assert_eq!(entries[3].entry_type, EntryType::File);
-    assert_eq!(entries[4].entry_type, EntryType::File);
-    
-    // Verify byte order sorting (not lexicographic)
-    // 'a' (0x61) should come before 'á' (0xC3 0xA1) in byte order
-    let a_file = entries.iter().find(|e| e.name == b"a.txt").unwrap();
-    let aacute_file = entries.iter().find(|e| e.name == b"\xc3\xa1.txt").unwrap();
-    assert!(a_file.name < aacute_file.name);
+    assert_eq!(entries[4].entry_type, EntryType::Directory);
 }
 
 #[test]

@@ -235,7 +235,7 @@ impl Directory {
     }
 
     /// Entry sorting key (Git's tree sorting rules)
-    fn entry_sort_key(entry: &DirectoryEntry) -> Vec<u8> {
+    pub fn entry_sort_key(entry: &DirectoryEntry) -> Vec<u8> {
         let mut key = entry.name.clone();
         if entry.entry_type == EntryType::Directory {
             key.push(b'/');
