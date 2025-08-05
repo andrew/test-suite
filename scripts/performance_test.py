@@ -63,11 +63,20 @@ def test_implementation(name: str, compute_func, test_dir: str,
     
     times = []
     swhid_result = None
+    error_msg = None
     
     for i in range(iterations):
         try:
             start_time = time.time()
-            result = compute_func(test_dir, "directory")
+            
+            # Handle different function signatures
+            if name in ['python']:
+                # Python runner doesn't take obj_type parameter
+                result = compute_func(test_dir)
+            else:
+                # Other runners take obj_type parameter
+                result = compute_func(test_dir, "directory")
+                
             end_time = time.time()
             
             duration = end_time - start_time
@@ -77,11 +86,22 @@ def test_implementation(name: str, compute_func, test_dir: str,
             print(f"  Iteration {i+1}: {duration:.3f}s -> {result}")
             
         except Exception as e:
+            error_msg = str(e)
             print(f"  Iteration {i+1}: ERROR - {e}")
-            return None
+            break  # Stop on first error
     
     if not times:
-        return None
+        return {
+            'name': name,
+            'error': error_msg or 'Unknown error',
+            'times': [],
+            'mean': None,
+            'median': None,
+            'min': None,
+            'max': None,
+            'std': None,
+            'swhid': None
+        }
     
     return {
         'name': name,
@@ -98,10 +118,14 @@ def test_implementation(name: str, compute_func, test_dir: str,
 def format_results(results: List[Dict]) -> str:
     """Format results into a readable string."""
     if not results:
-        return "No successful results"
+        return "No results"
     
-    # Sort by mean time (fastest first)
-    results.sort(key=lambda x: x['mean'])
+    # Separate successful and failed results
+    successful = [r for r in results if r.get('mean') is not None]
+    failed = [r for r in results if r.get('mean') is None]
+    
+    # Sort successful results by mean time (fastest first)
+    successful.sort(key=lambda x: x['mean'])
     
     output = []
     output.append("=" * 80)
@@ -110,9 +134,6 @@ def format_results(results: List[Dict]) -> str:
     output.append("")
     
     # Successful implementations
-    successful = [r for r in results if r is not None]
-    failed = [r for r in results if r is None]
-    
     if successful:
         output.append(f"Successful implementations ({len(successful)}):")
         output.append("-" * 80)
@@ -127,6 +148,7 @@ def format_results(results: List[Dict]) -> str:
             output.append(f"    SWHID: {result['swhid']}")
             output.append("")
     
+    # Failed implementations
     if failed:
         output.append(f"Failed implementations ({len(failed)}):")
         output.append("-" * 80)
