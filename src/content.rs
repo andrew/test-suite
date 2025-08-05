@@ -31,6 +31,21 @@ impl Content {
         Ok(Self::from_data(data))
     }
 
+    /// Create content from file path with size limit
+    pub fn from_file_with_limit<P: AsRef<Path>>(path: P, max_length: Option<usize>) -> Result<Self, SwhidError> {
+        let data = fs::read(path)?;
+        
+        if let Some(max_len) = max_length {
+            if data.len() > max_len {
+                return Err(SwhidError::UnsupportedOperation(
+                    format!("Content too large ({} bytes)", data.len())
+                ));
+            }
+        }
+        
+        Ok(Self::from_data(data))
+    }
+
     /// Get the raw data
     pub fn data(&self) -> &[u8] {
         &self.data

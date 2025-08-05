@@ -557,6 +557,188 @@ fn test_symlink_as_object() {
 }
 
 #[test]
+fn test_content_size_limit_file() {
+    let test_dir = TestDir::new();
+    
+    // Create a file that exceeds the size limit
+    let large_content = vec![b'a'; 1000];
+    test_dir.create_file("large.txt", &large_content);
+    
+    // Test with size limit smaller than file size
+    let computer = SwhidComputer::new().with_max_content_length(Some(500));
+    let result = computer.compute_swhid(test_dir.path().join("large.txt"));
+    
+    // Should return an error or special status for oversized content
+    assert!(result.is_err() || result.unwrap().object_id() != Content::from_data(large_content).swhid().object_id());
+}
+
+#[test]
+fn test_content_size_limit_symlink() {
+    let test_dir = TestDir::new();
+    
+    // Create a symlink with a target path that exceeds size limit
+    let long_target = "a".repeat(1000);
+    test_dir.create_symlink("long_link.txt", &long_target);
+    
+    // Test with size limit smaller than symlink target length
+    let computer = SwhidComputer::new().with_max_content_length(Some(500));
+    let result = computer.compute_swhid(test_dir.path().join("long_link.txt"));
+    
+    // Should return an error for oversized symlink
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_content_size_limit_within_bounds() {
+    let test_dir = TestDir::new();
+    
+    // Create a file within the size limit
+    let small_content = vec![b'a'; 100];
+    test_dir.create_file("small.txt", &small_content);
+    
+    // Test with size limit larger than file size
+    let computer = SwhidComputer::new().with_max_content_length(Some(500));
+    let result = computer.compute_swhid(test_dir.path().join("small.txt"));
+    
+    // Should succeed and return correct hash
+    assert!(result.is_ok());
+    let expected_swhid = Content::from_data(small_content).swhid();
+    assert_eq!(result.unwrap().object_id(), expected_swhid.object_id());
+}
+
+#[test]
+fn test_cli_verify_match() {
+    let test_dir = TestDir::new();
+    test_dir.create_file("test.txt", b"Hello, World!");
+    
+    let computer = SwhidComputer::new();
+    let expected_swhid = computer.compute_swhid(test_dir.path().join("test.txt")).unwrap();
+    
+    // Test verification with matching SWHID
+    let result = computer.verify_swhid(&expected_swhid.to_string(), test_dir.path().join("test.txt"));
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_cli_verify_mismatch() {
+    let test_dir = TestDir::new();
+    test_dir.create_file("test.txt", b"Hello, World!");
+    
+    let computer = SwhidComputer::new();
+    let computed_swhid = computer.compute_swhid(test_dir.path().join("test.txt")).unwrap();
+    
+    // Create a different expected SWHID
+    let wrong_swhid = Swhid::new(ObjectType::Content, [0u8; 20]);
+    
+    // Test verification with mismatching SWHID
+    let result = computer.verify_swhid(&wrong_swhid.to_string(), test_dir.path().join("test.txt"));
+    assert!(result.is_ok() && !result.unwrap());
+}
+
+#[test]
+fn test_cli_verify_invalid_swhid() {
+    let test_dir = TestDir::new();
+    test_dir.create_file("test.txt", b"Hello, World!");
+    
+    let computer = SwhidComputer::new();
+    
+    // Test verification with invalid SWHID format
+    let result = computer.verify_swhid("invalid-swhid", test_dir.path().join("test.txt"));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_swhid_validation_invalid_formats() {
+    // Test various invalid SWHID formats
+    let invalid_swhids = vec![
+        "swh:1:cnt",  // Missing hash
+        "swh:1:",  // Missing object type and hash
+        "swh:",  // Missing version, object type, and hash
+        "swh:1:cnt:",  // Missing hash
+        "foo:1:cnt:abc8bc9d7a6bcf6db04f476d29314f157507d505",  // Wrong namespace
+        "swh:2:dir:def8bc9d7a6bcf6db04f476d29314f157507d505",  // Wrong version
+        "swh:1:foo:fed8bc9d7a6bcf6db04f476d29314f157507d505",  // Invalid object type
+        "swh:1:dir:0b6959356d30f1a4e9b7f6bca59b9a336464c03d;invalid;malformed",  // Invalid qualifiers
+        "swh:1:snp:gh6959356d30f1a4e9b7f6bca59b9a336464c03d",  // Invalid hash characters
+        "swh:1:snp:foo",  // Invalid hash format
+        "swh :1:dir:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",  // Whitespace in namespace
+        "swh: 1:dir:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",  // Whitespace in version
+        "swh:1: dir:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",  // Whitespace in object type
+    ];
+
+    for invalid_swhid in invalid_swhids {
+        let result = Swhid::from_string(invalid_swhid);
+        assert!(result.is_err(), "SWHID '{}' should be invalid", invalid_swhid);
+    }
+}
+
+#[test]
+fn test_swhid_validation_valid_formats() {
+    // Test various valid SWHID formats
+    let valid_swhids = vec![
+        "swh:1:cnt:94a9ed024d3859793618152ea559a168bbcbb5e2",
+        "swh:1:dir:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",
+        "swh:1:rev:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",
+        "swh:1:rel:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",
+        "swh:1:snp:0b6959356d30f1a4e9b7f6bca59b9a336464c03d",
+    ];
+
+    for valid_swhid in valid_swhids {
+        let result = Swhid::from_string(valid_swhid);
+        assert!(result.is_ok(), "SWHID '{}' should be valid", valid_swhid);
+    }
+}
+
+#[test]
+fn test_swhid_validation_hash_length() {
+    // Test that SWHID validation requires exactly 20 bytes (40 hex chars)
+    let short_hash = "swh:1:cnt:1234567890abcdef";  // 16 chars
+    let long_hash = "swh:1:cnt:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";  // 64 chars
+    let invalid_chars = "swh:1:cnt:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg";  // Invalid hex
+    
+    assert!(Swhid::from_string(short_hash).is_err());
+    assert!(Swhid::from_string(long_hash).is_err());
+    assert!(Swhid::from_string(invalid_chars).is_err());
+}
+
+#[test]
+fn test_special_file_handling() {
+    let test_dir = TestDir::new();
+    
+    // Test that special files (non-regular files) are handled correctly
+    // This would require creating actual special files, but for now we'll test
+    // that our implementation handles them gracefully
+    
+    // Test with a regular file first
+    test_dir.create_file("regular.txt", b"content");
+    let computer = SwhidComputer::new();
+    let result = computer.compute_swhid(test_dir.path().join("regular.txt"));
+    assert!(result.is_ok());
+    
+    // Note: Testing actual special files (sockets, pipes, etc.) would require
+    // system-specific code and might not be portable. The Python implementation
+    // returns empty content for special files, which is what we should do too.
+}
+
+#[test]
+fn test_empty_file_handling() {
+    let test_dir = TestDir::new();
+    
+    // Test empty file
+    test_dir.create_file("empty.txt", b"");
+    
+    let computer = SwhidComputer::new();
+    let result = computer.compute_swhid(test_dir.path().join("empty.txt"));
+    assert!(result.is_ok());
+    
+    // Empty file should have a specific hash
+    let swhid = result.unwrap();
+    let expected_content = Content::from_data(vec![]);
+    let expected_swhid = expected_content.swhid();
+    assert_eq!(swhid.object_id(), expected_swhid.object_id());
+}
+
+#[test]
 fn test_recursive_hash_consistency() {
     let test_dir = TestDir::new();
     

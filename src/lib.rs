@@ -22,6 +22,7 @@ pub struct SwhidComputer {
     // Configuration options
     exclude_patterns: Vec<String>,
     follow_symlinks: bool,
+    max_content_length: Option<usize>,
 }
 
 impl Default for SwhidComputer {
@@ -29,6 +30,7 @@ impl Default for SwhidComputer {
         Self {
             exclude_patterns: vec![],
             follow_symlinks: true,
+            max_content_length: None,
         }
     }
 }
@@ -48,9 +50,14 @@ impl SwhidComputer {
         self
     }
 
+    pub fn with_max_content_length(mut self, max_length: Option<usize>) -> Self {
+        self.max_content_length = max_length;
+        self
+    }
+
     /// Compute SWHID for a file
     pub fn compute_file_swhid<P: AsRef<Path>>(&self, path: P) -> Result<Swhid, SwhidError> {
-        let content = content::Content::from_file(path)?;
+        let content = content::Content::from_file_with_limit(path, self.max_content_length)?;
         Ok(content.swhid())
     }
 
@@ -86,6 +93,16 @@ impl SwhidComputer {
                 // Treat symlink as content - the content is the target path
                 let target = fs::read_link(path)?;
                 let target_bytes = target.to_string_lossy().as_bytes().to_vec();
+                
+                // Check size limit for symlink target
+                if let Some(max_len) = self.max_content_length {
+                    if target_bytes.len() > max_len {
+                        return Err(SwhidError::UnsupportedOperation(
+                            format!("Symlink too large ({} bytes)", target_bytes.len())
+                        ));
+                    }
+                }
+                
                 let content = content::Content::from_data(target_bytes);
                 Ok(content.swhid())
             }
@@ -96,6 +113,18 @@ impl SwhidComputer {
         } else {
             Err(SwhidError::InvalidPath("Path is neither file nor directory".to_string()))
         }
+    }
+
+    /// Verify that a SWHID matches the computed SWHID for a path
+    pub fn verify_swhid<P: AsRef<Path>>(&self, expected_swhid: &str, path: P) -> Result<bool, SwhidError> {
+        // Parse the expected SWHID
+        let expected = Swhid::from_string(expected_swhid)?;
+        
+        // Compute the actual SWHID
+        let actual = self.compute_swhid(path)?;
+        
+        // Compare the SWHIDs
+        Ok(expected == actual)
     }
 }
 
