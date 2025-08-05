@@ -135,8 +135,8 @@ impl Directory {
                 entry.metadata()? // Note: symlink_metadata() is not available on DirEntry
             };
 
-            // Skip excluded directories (but not files)
-            if metadata.is_dir() && Self::should_exclude(&name_bytes, exclude_patterns) {
+            // Skip excluded files and directories
+            if Self::should_exclude(&name_bytes, exclude_patterns) {
                 continue;
             }
 
@@ -173,8 +173,21 @@ impl Directory {
             entries.push(DirectoryEntry::new(name_bytes, entry_type, permissions, target));
         }
 
-        // Sort entries according to Git's tree sorting rules
-        entries.sort_by(|a, b| Self::entry_sort_key(a).cmp(&Self::entry_sort_key(b)));
+        // Sort entries according to Git's tree sorting rules:
+        // 1. Directories first (with trailing slash in name)
+        // 2. Files second
+        // 3. Within each group, sorted by byte order
+        entries.sort_by(|a, b| {
+            // First, sort by type (directories before files)
+            match (a.entry_type, b.entry_type) {
+                (EntryType::Directory, EntryType::File) => std::cmp::Ordering::Less,
+                (EntryType::File, EntryType::Directory) => std::cmp::Ordering::Greater,
+                _ => {
+                    // Within same type, sort by byte order
+                    a.name.cmp(&b.name)
+                }
+            }
+        });
 
         Ok(Self {
             entries,
@@ -345,8 +358,8 @@ fn build_directory_tree(
             entry.metadata()?
         };
 
-        // Skip excluded directories (but not files)
-        if metadata.is_dir() && should_exclude_str(&String::from_utf8_lossy(&name_bytes), exclude_patterns) {
+        // Skip excluded files and directories
+        if should_exclude_str(&String::from_utf8_lossy(&name_bytes), exclude_patterns) {
             continue;
         }
 

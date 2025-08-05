@@ -14,7 +14,7 @@ pub use swhid::{Swhid, ObjectType};
 pub use error::SwhidError;
 pub use person::Person;
 pub use timestamp::{Timestamp, TimestampWithTimezone};
-pub use directory::{TreeObject, traverse_directory_recursively, Directory, EntryType, Permissions};
+pub use directory::{TreeObject, traverse_directory_recursively, Directory, EntryType, Permissions, DirectoryEntry};
 pub use content::Content;
 
 /// Main entry point for computing SWHIDs

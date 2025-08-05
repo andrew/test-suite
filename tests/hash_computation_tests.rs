@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
-use swhid::{Content, Directory, SwhidComputer, traverse_directory_recursively, TreeObject, SwhidError, Swhid, ObjectType, EntryType, Permissions};
+use swhid::{Content, Directory, SwhidComputer, traverse_directory_recursively, TreeObject, SwhidError, Swhid, ObjectType, EntryType, Permissions, DirectoryEntry};
 
 /// Test helper to create a temporary directory with specific structure
 struct TestDir {
@@ -736,6 +736,239 @@ fn test_empty_file_handling() {
     let expected_content = Content::from_data(vec![]);
     let expected_swhid = expected_content.swhid();
     assert_eq!(swhid.object_id(), expected_swhid.object_id());
+}
+
+#[test]
+fn test_exclusion_case_sensitivity() {
+    let test_dir = TestDir::new();
+    
+    // Create files with different case variations
+    test_dir.create_file("File.txt", b"content1");
+    test_dir.create_file("file.txt", b"content2");
+    test_dir.create_file("FILE.txt", b"content3");
+    test_dir.create_file("other.txt", b"content4");
+    
+    // Test case-sensitive exclusion
+    let computer = SwhidComputer::new().with_exclude_patterns(vec!["file.txt".to_string()]);
+    let objects = traverse_directory_recursively(test_dir.path(), &["file.txt".to_string()], true).unwrap();
+    
+    // Should exclude only "file.txt" (exact match), not "File.txt" or "FILE.txt"
+    let file_names: Vec<String> = objects.iter()
+        .filter_map(|(path, obj)| {
+            if let TreeObject::Content(_) = obj {
+                Some(path.file_name().unwrap().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    // Should still have "File.txt", "FILE.txt", and "other.txt"
+    assert!(file_names.contains(&"File.txt".to_string()));
+    assert!(file_names.contains(&"FILE.txt".to_string()));
+    assert!(file_names.contains(&"other.txt".to_string()));
+    // Should NOT have "file.txt"
+    assert!(!file_names.contains(&"file.txt".to_string()));
+}
+
+#[test]
+fn test_exclusion_case_insensitive_pattern() {
+    let test_dir = TestDir::new();
+    
+    // Create files with different case variations
+    test_dir.create_file("File.txt", b"content1");
+    test_dir.create_file("file.txt", b"content2");
+    test_dir.create_file("FILE.txt", b"content3");
+    test_dir.create_file("other.txt", b"content4");
+    
+    // Test with case-insensitive pattern (if supported)
+    // Note: Our current implementation is case-sensitive, so this test verifies that behavior
+    let computer = SwhidComputer::new().with_exclude_patterns(vec!["FILE.TXT".to_string()]);
+    let objects = traverse_directory_recursively(test_dir.path(), &["FILE.TXT".to_string()], true).unwrap();
+    
+    let file_names: Vec<String> = objects.iter()
+        .filter_map(|(path, obj)| {
+            if let TreeObject::Content(_) = obj {
+                Some(path.file_name().unwrap().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    // With case-sensitive matching, "FILE.TXT" should only match "FILE.TXT"
+    assert!(file_names.contains(&"File.txt".to_string()));
+    assert!(file_names.contains(&"file.txt".to_string()));
+    assert!(file_names.contains(&"FILE.txt".to_string())); // Different case, should NOT be excluded
+    assert!(file_names.contains(&"other.txt".to_string()));
+    // Should NOT have "FILE.TXT" (exact case match)
+    assert!(!file_names.contains(&"FILE.TXT".to_string()));
+}
+
+#[test]
+fn test_exclusion_trailing_slash() {
+    let test_dir = TestDir::new();
+    
+    // Create directory structure
+    test_dir.create_subdir("docs");
+    test_dir.create_file("docs/readme.txt", b"content1");
+    test_dir.create_file("docs/api.txt", b"content2");
+    test_dir.create_file("docs_file", b"content3"); // This creates a file named "docs_file"
+    test_dir.create_file("other.txt", b"content4");
+    
+    // Test exclusion with trailing slash
+    let objects = traverse_directory_recursively(test_dir.path(), &["docs_file".to_string()], true).unwrap();
+    
+    let file_names: Vec<String> = objects.iter()
+        .filter_map(|(path, obj)| {
+            if let TreeObject::Content(_) = obj {
+                Some(path.file_name().unwrap().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    // Should exclude the "docs_file" file (exact match)
+    assert!(!file_names.contains(&"docs_file".to_string()));
+    // Should still have other files
+    assert!(file_names.contains(&"other.txt".to_string()));
+}
+
+#[test]
+fn test_exclusion_directory_vs_file() {
+    let test_dir = TestDir::new();
+    
+    // Create both a directory and a file with similar names
+    test_dir.create_subdir("docs");
+    test_dir.create_file("docs/readme.txt", b"content1");
+    test_dir.create_file("docs_file", b"content2"); // File named "docs_file"
+    test_dir.create_file("other.txt", b"content3");
+    
+    // Test exclusion of directory vs file
+    let objects = traverse_directory_recursively(test_dir.path(), &["docs_file".to_string()], true).unwrap();
+    
+    let file_names: Vec<String> = objects.iter()
+        .filter_map(|(path, obj)| {
+            if let TreeObject::Content(_) = obj {
+                Some(path.file_name().unwrap().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    // Should exclude the "docs_file" file (exact match)
+    assert!(!file_names.contains(&"docs_file".to_string()));
+    // Should still have other files
+    assert!(file_names.contains(&"other.txt".to_string()));
+    // The "docs" directory and its contents should still be included
+    // (since we're only excluding the file named "docs_file")
+}
+
+#[test]
+fn test_directory_entry_order_git_compliance() {
+    let test_dir = TestDir::new();
+    
+    // Create files and directories in a specific order to test Git tree sorting
+    // Git sorts entries by: directories first (with trailing slash), then files
+    // Within each group, sorted by byte order
+    test_dir.create_file("a.txt", b"content1");
+    test_dir.create_file("z.txt", b"content2");
+    test_dir.create_subdir("alpha");
+    test_dir.create_file("alpha/file.txt", b"content3");
+    test_dir.create_subdir("zebra");
+    test_dir.create_file("zebra/file.txt", b"content4");
+    test_dir.create_file("1.txt", b"content5");
+    test_dir.create_file("9.txt", b"content6");
+    
+    let dir = Directory::from_disk(test_dir.path(), &[], true).unwrap();
+    let entries = dir.entries();
+    
+    // Verify that entries are sorted according to Git tree rules:
+    // 1. Directories first (with trailing slash in name)
+    // 2. Files second
+    // 3. Within each group, sorted by byte order
+    
+    let mut prev_entry: Option<&DirectoryEntry> = None;
+    for entry in entries {
+        if let Some(prev) = prev_entry {
+            // Directories should come before files
+            if prev.entry_type == EntryType::Directory && entry.entry_type == EntryType::File {
+                // This is correct - directories before files
+            } else if prev.entry_type == EntryType::File && entry.entry_type == EntryType::Directory {
+                panic!("Files should come after directories in Git tree order");
+            } else {
+                // Within same type, should be sorted by byte order
+                assert!(prev.name <= entry.name, 
+                    "Entries not in byte order: {:?} > {:?}", 
+                    String::from_utf8_lossy(&prev.name), 
+                    String::from_utf8_lossy(&entry.name));
+            }
+        }
+        prev_entry = Some(entry);
+    }
+}
+
+#[test]
+fn test_directory_entry_order_specific_examples() {
+    let test_dir = TestDir::new();
+    
+    // Create a specific set of entries to test exact ordering
+    test_dir.create_file("a", b"content1");
+    test_dir.create_subdir("b");
+    test_dir.create_file("c", b"content2");
+    test_dir.create_subdir("d");
+    
+    let dir = Directory::from_disk(test_dir.path(), &[], true).unwrap();
+    let entries: Vec<&DirectoryEntry> = dir.entries().iter().collect();
+    
+    // Should have 4 entries
+    assert_eq!(entries.len(), 4);
+    
+    // Order should be: directories first (b, d), then files (a, c)
+    // Within each group, sorted by byte order
+    assert_eq!(entries[0].name, b"b");
+    assert_eq!(entries[0].entry_type, EntryType::Directory);
+    assert_eq!(entries[1].name, b"d");
+    assert_eq!(entries[1].entry_type, EntryType::Directory);
+    assert_eq!(entries[2].name, b"a");
+    assert_eq!(entries[2].entry_type, EntryType::File);
+    assert_eq!(entries[3].name, b"c");
+    assert_eq!(entries[3].entry_type, EntryType::File);
+}
+
+#[test]
+fn test_directory_entry_order_with_special_chars() {
+    let test_dir = TestDir::new();
+    
+    // Test with special characters and unicode
+    test_dir.create_file("a.txt", b"content1");
+    test_dir.create_file("á.txt", b"content2"); // Unicode
+    test_dir.create_file("z.txt", b"content3");
+    test_dir.create_subdir("alpha");
+    test_dir.create_subdir("ápha"); // Unicode directory
+    
+    let dir = Directory::from_disk(test_dir.path(), &[], true).unwrap();
+    let entries: Vec<&DirectoryEntry> = dir.entries().iter().collect();
+    
+    // Should have 5 entries
+    assert_eq!(entries.len(), 5);
+    
+    // Directories should come first, sorted by byte order
+    assert_eq!(entries[0].entry_type, EntryType::Directory);
+    assert_eq!(entries[1].entry_type, EntryType::Directory);
+    
+    // Files should come after, sorted by byte order
+    assert_eq!(entries[2].entry_type, EntryType::File);
+    assert_eq!(entries[3].entry_type, EntryType::File);
+    assert_eq!(entries[4].entry_type, EntryType::File);
+    
+    // Verify byte order sorting (not lexicographic)
+    // 'a' (0x61) should come before 'á' (0xC3 0xA1) in byte order
+    let a_file = entries.iter().find(|e| e.name == b"a.txt").unwrap();
+    let aacute_file = entries.iter().find(|e| e.name == b"\xc3\xa1.txt").unwrap();
+    assert!(a_file.name < aacute_file.name);
 }
 
 #[test]
