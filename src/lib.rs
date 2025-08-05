@@ -9,6 +9,9 @@ pub mod content;
 pub mod error;
 pub mod person;
 pub mod timestamp;
+pub mod revision;
+pub mod release;
+pub mod snapshot;
 
 pub use swhid::{Swhid, ObjectType, ExtendedSwhid, ExtendedObjectType, QualifiedSwhid};
 pub use error::SwhidError;
@@ -16,6 +19,9 @@ pub use person::Person;
 pub use timestamp::{Timestamp, TimestampWithTimezone};
 pub use directory::{TreeObject, traverse_directory_recursively, Directory, EntryType, Permissions, DirectoryEntry};
 pub use content::Content;
+pub use revision::{Revision, RevisionType};
+pub use release::{Release, ReleaseTargetType};
+pub use snapshot::{Snapshot, SnapshotBranch, SnapshotTargetType};
 
 /// Main entry point for computing SWHIDs
 pub struct SwhidComputer {
