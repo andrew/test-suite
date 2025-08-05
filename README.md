@@ -253,6 +253,9 @@ python scripts/performance_test.py
 
 # Test on a different directory
 python scripts/performance_test.py /path/to/test/directory
+
+# Or use the automated script (builds and runs test)
+./scripts/run_performance_test.sh
 ```
 
 Requirements for performance testing:
