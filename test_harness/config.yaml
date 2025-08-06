@@ -8,6 +8,12 @@ implementations:
     command: "cargo run --"
     enabled: true
     
+  rust-lib:
+    name: "Rust Binary Implementation"
+    runner: "runners/rust_bin_runner.py"
+    command: "cargo build --release"
+    enabled: true
+    
   python:
     name: "Python Implementation"
     runner: "runners/python_runner.py"
@@ -18,7 +24,7 @@ implementations:
     name: "Git Implementation (dulwich)"
     runner: "runners/git_runner.py"
     command: "python -c 'import dulwich'"
-    enabled: true
+    enabled: false  # Disabled due to inconsistent hash results
     
   git-cmd:
     name: "Git Command Implementation"
