@@ -9,7 +9,7 @@ keywords = ["swhid", "software-heritage", "hash", "identifier"]
 categories = ["data-structures", "encoding"]
 
 [dependencies]
-sha1 = "0.10"
+sha1-checked = "0.10"
 sha2 = "0.10"
 hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }

@@ -546,6 +546,43 @@ pub fn to_git_object(&self) -> Vec<u8> {
 **Specification Quote**:
 > "SWHIDs for contents, directories, revisions, and releases are compatible with the way the current version of Git proceeds for computing identifiers for its objects"
 
+### SHA1DC Compliance
+
+**Critical Security Requirement**: The SWHID specification requires using SHA1DC (SHA-1 with detection of collision) to prevent SHATTERED-style attacks. This is a **mandatory security requirement**, not optional.
+
+#### SHATTERED Attack Background
+
+The SHATTERED attack demonstrated that standard SHA-1 is vulnerable to collision attacks, where two different inputs can produce the same hash. This could allow attackers to:
+
+1. **Fabricate objects**: Create malicious files that hash to the same SWHID as legitimate files
+2. **Undermine integrity**: Compromise the uniqueness guarantee of SWHID identifiers
+3. **Exploit software heritage**: Insert malicious code into software archives
+
+#### Implementation Solution
+
+The implementation uses `sha1-checked = "0.10"` which provides SHA-1 with collision detection:
+
+```rust
+use sha1_checked::{Sha1, Digest};
+
+/// Git-style SHA1 hash computation (collision-resistant)
+/// Uses SHA1-checked to prevent SHATTERED-style attacks as required by SWHID spec
+pub fn sha1_git_hash(data: &[u8]) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    let header = format!("blob {}\0", data.len());
+    hasher.update(header.as_bytes());
+    hasher.update(data);
+    hasher.finalize().into()
+}
+```
+
+#### Security Benefits
+
+- **Collision Detection**: Automatically detects known collision patterns
+- **Attack Prevention**: Prevents SHATTERED-style attacks
+- **Specification Compliance**: Meets SWHID security requirements
+- **Git Compatibility**: Matches Git's SHA1DC usage since 2017
+
 ### Git Object Hashing
 
 ```rust
