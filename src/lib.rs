@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::fs;
 
 pub mod swhid;
 pub mod hash;
