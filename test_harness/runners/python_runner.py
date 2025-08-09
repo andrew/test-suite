@@ -36,6 +36,12 @@ def compute_swhid(payload_path: str, obj_type: Optional[str] = None,
     if archive:
         cmd.append("--archive")
     
+    # Ensure snapshot type is passed for git repos
+    if obj_type is None:
+        obj_type = detect_object_type(payload_path)
+        if obj_type and obj_type != "auto":
+            # Reset and add again to ensure correct flag ordering
+            cmd = ["python", "-m", "swh.model.cli", "--type", obj_type]
     # Add the payload path
     cmd.append(payload_path)
     

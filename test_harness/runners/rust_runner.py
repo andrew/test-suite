@@ -126,14 +126,16 @@ def compute_swhid_auto(payload_path: str) -> str:
 
 def compute_swhid_simple(payload_path: str) -> str:
     """Simple interface that auto-detects object type."""
-    # For content files, explicitly specify the object type
     path = Path(payload_path)
     if path.is_file():
         return compute_swhid_detailed(payload_path, "content")
     elif path.is_dir():
+        # If this is a git repository, compute snapshot SWHID
+        git_dir = path / ".git"
+        if git_dir.exists() and git_dir.is_dir():
+            return compute_swhid_detailed(payload_path, "snapshot")
         return compute_swhid_detailed(payload_path, "directory")
     else:
-        # Fallback to auto-detection
         obj_type = detect_object_type(payload_path)
         return compute_swhid_detailed(payload_path, obj_type)
 

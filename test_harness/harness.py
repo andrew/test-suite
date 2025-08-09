@@ -161,8 +161,16 @@ class SwhidHarness:
                 payload_name = payload["name"]
                 expected_swhid = payload.get("expected_swhid")
                 
-                # Check if payload exists
-                if not os.path.exists(payload_path):
+                # Ensure git payloads exist by creating synthetic repos on-the-fly
+                if category == "git" and not os.path.exists(payload_path):
+                    try:
+                        self._create_minimal_git_repo(payload_path)
+                        logger.info(f"Created synthetic git payload at: {payload_path}")
+                    except Exception as e:
+                        logger.warning(f"Payload not found: {payload_path}")
+                        logger.debug(f"Failed to create git payload: {e}")
+                        continue
+                elif not os.path.exists(payload_path):
                     logger.warning(f"Payload not found: {payload_path}")
                     continue
                 
@@ -200,6 +208,34 @@ class SwhidHarness:
                             logger.error(f"  {impl}: Error - {result.error}")
         
         return all_results
+
+    def _create_minimal_git_repo(self, repo_path: str):
+        """Create a small git repository with one commit, one tag, and default HEAD.
+        This is used to test snapshot identifiers.
+        """
+        import subprocess
+        import pathlib
+        path = pathlib.Path(repo_path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Initialize repo
+        subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
+        # Configure user
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_path, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True)
+        # Create a file and commit
+        (path / "README.md").write_text("# Sample Repo\n")
+        subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True, capture_output=True)
+        # Create a branch 'feature'
+        subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo_path, check=True, capture_output=True)
+        (path / "FEATURE.txt").write_text("feature\n")
+        subprocess.run(["git", "add", "FEATURE.txt"], cwd=repo_path, check=True)
+        subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True, capture_output=True)
+        # Switch back to main
+        subprocess.run(["git", "checkout", "-B", "main"], cwd=repo_path, check=True, capture_output=True)
+        # Create an annotated tag
+        subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True, capture_output=True)
     
     def generate_expected_results(self, implementation: str = "python"):
         """Generate expected results using a reference implementation."""

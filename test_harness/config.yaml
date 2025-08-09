@@ -105,21 +105,9 @@ payloads:
       description: "Bzip2 compressed tar"
 
   git:
-    - name: "simple_repo"
-      path: "payloads/git/simple/"
-      description: "Simple Git repository"
-      
-    - name: "branch_repo"
-      path: "payloads/git/branches/"
-      description: "Repository with branches"
-      
-    - name: "tag_repo"
-      path: "payloads/git/tags/"
-      description: "Repository with tags"
-      
-    - name: "complex_repo"
-      path: "payloads/git/complex/"
-      description: "Complex repository with history"
+    - name: "synthetic_repo"
+      path: "payloads/git/synthetic/"
+      description: "Synthetic Git repo with main, feature, and a tag"
 
 # Test settings
 settings:
