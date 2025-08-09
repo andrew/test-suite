@@ -54,15 +54,15 @@ fn main() {
     let mut branches = std::collections::HashMap::new();
     
     // Add main branch pointing to the revision
-    let main_branch = SnapshotBranch::new(*revision.id(), SnapshotTargetType::Revision);
+    let main_branch = SnapshotBranch::new((*revision.id()).to_vec(), SnapshotTargetType::Revision);
     branches.insert(b"main".to_vec(), Some(main_branch));
     
     // Add a tag branch pointing to the release
-    let tag_branch = SnapshotBranch::new(*release.id(), SnapshotTargetType::Release);
+    let tag_branch = SnapshotBranch::new((*release.id()).to_vec(), SnapshotTargetType::Release);
     branches.insert(b"refs/tags/v1.0.0".to_vec(), Some(tag_branch));
     
     // Add an alias (like HEAD)
-    let alias_branch = SnapshotBranch::new(*revision.id(), SnapshotTargetType::Alias);
+    let alias_branch = SnapshotBranch::new((*revision.id()).to_vec(), SnapshotTargetType::Alias);
     branches.insert(b"HEAD".to_vec(), Some(alias_branch));
 
     let snapshot = Snapshot::new(branches);

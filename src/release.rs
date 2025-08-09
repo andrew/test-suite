@@ -99,8 +99,15 @@ impl Release {
             parts.push(format!("object {}", hex::encode(target)).into_bytes());
         }
 
-        // Type
-        parts.push(format!("type {}", self.target_type).into_bytes());
+        // Type (map SWH target type to Git object type per spec)
+        let git_type = match self.target_type {
+            ReleaseTargetType::Content => "blob",
+            ReleaseTargetType::Directory => "tree",
+            ReleaseTargetType::Revision => "commit",
+            ReleaseTargetType::Release => "tag",
+            ReleaseTargetType::Snapshot => "refs",
+        };
+        parts.push(format!("type {}", git_type).into_bytes());
 
         // Tag
         parts.push(format!("tag {}", String::from_utf8_lossy(&self.name)).into_bytes());

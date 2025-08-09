@@ -22,6 +22,62 @@ pub use revision::{Revision, RevisionType};
 pub use release::{Release, ReleaseTargetType};
 pub use snapshot::{Snapshot, SnapshotBranch, SnapshotTargetType};
 
+/// Cache statistics for monitoring
+#[derive(Debug, Clone, Default)]
+pub struct CacheStats {
+    pub directory_hits: usize,
+    pub directory_misses: usize,
+    pub content_hits: usize,
+    pub content_misses: usize,
+    pub total_operations: usize,
+}
+
+impl CacheStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn directory_hit(&mut self) {
+        self.directory_hits += 1;
+        self.total_operations += 1;
+    }
+
+    pub fn directory_miss(&mut self) {
+        self.directory_misses += 1;
+        self.total_operations += 1;
+    }
+
+    pub fn content_hit(&mut self) {
+        self.content_hits += 1;
+        self.total_operations += 1;
+    }
+
+    pub fn content_miss(&mut self) {
+        self.content_misses += 1;
+        self.total_operations += 1;
+    }
+
+    pub fn hit_rate(&self) -> f64 {
+        if self.total_operations == 0 {
+            0.0
+        } else {
+            (self.directory_hits + self.content_hits) as f64 / self.total_operations as f64
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "Cache Stats: {} total ops, {:.1}% hit rate (dir: {}+/{}-, content: {}+/{}-)",
+            self.total_operations,
+            self.hit_rate() * 100.0,
+            self.directory_hits,
+            self.directory_misses,
+            self.content_hits,
+            self.content_misses
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct SwhidComputer {
     pub follow_symlinks: bool,
@@ -29,6 +85,9 @@ pub struct SwhidComputer {
     pub max_content_length: Option<usize>,
     pub filename: bool,
     pub recursive: bool,
+    pub debug: bool,
+    pub debug_verbose: bool,
+    pub cache_stats: CacheStats,
 }
 
 impl Default for SwhidComputer {
@@ -39,6 +98,9 @@ impl Default for SwhidComputer {
             max_content_length: None,
             filename: true,
             recursive: false,
+            debug: false,
+            debug_verbose: false,
+            cache_stats: CacheStats::new(),
         }
     }
 }
@@ -71,6 +133,30 @@ impl SwhidComputer {
     pub fn with_recursive(mut self, recursive: bool) -> Self {
         self.recursive = recursive;
         self
+    }
+
+    pub fn with_debug(mut self, debug: bool) -> Self {
+        self.debug = debug;
+        self
+    }
+
+    pub fn with_debug_verbose(mut self, debug_verbose: bool) -> Self {
+        self.debug_verbose = debug_verbose;
+        self
+    }
+
+    pub fn cache_stats(&self) -> &CacheStats {
+        &self.cache_stats
+    }
+
+    pub fn cache_stats_mut(&mut self) -> &mut CacheStats {
+        &mut self.cache_stats
+    }
+
+    pub fn print_cache_summary(&self) {
+        if self.debug || self.debug_verbose {
+            eprintln!("{}", self.cache_stats.summary());
+        }
     }
 
     /// Compute SWHID for content bytes
@@ -149,24 +235,18 @@ impl SwhidComputer {
             if let Some(target) = reference.target() {
                 let target_id = target.as_bytes();
                 
-                // Convert Vec<u8> to [u8; 20] for SnapshotBranch
-                if target_id.len() == 20 {
-                    let mut target_array = [0u8; 20];
-                    target_array.copy_from_slice(&target_id);
-                    
-                    // Get the object type
-                    if let Ok(obj) = repo.find_object(target, None) {
-                        let target_type = match obj.kind() {
-                            Some(git2::ObjectType::Blob) => SnapshotTargetType::Content,
-                            Some(git2::ObjectType::Tree) => SnapshotTargetType::Directory,
-                            Some(git2::ObjectType::Commit) => SnapshotTargetType::Revision,
-                            Some(git2::ObjectType::Tag) => SnapshotTargetType::Release,
-                            _ => SnapshotTargetType::Revision, // Default fallback
-                        };
+                // Target id length should be 20 for object ids
+                if let Ok(obj) = repo.find_object(target, None) {
+                    let target_type = match obj.kind() {
+                        Some(git2::ObjectType::Blob) => SnapshotTargetType::Content,
+                        Some(git2::ObjectType::Tree) => SnapshotTargetType::Directory,
+                        Some(git2::ObjectType::Commit) => SnapshotTargetType::Revision,
+                        Some(git2::ObjectType::Tag) => SnapshotTargetType::Release,
+                        _ => SnapshotTargetType::Revision,
+                    };
 
-                        let branch = SnapshotBranch::new(target_array, target_type);
-                        branches.insert(name, Some(branch));
-                    }
+                    let branch = SnapshotBranch::new(target_id.to_vec(), target_type);
+                    branches.insert(name, Some(branch));
                 }
             }
         }
@@ -175,20 +255,12 @@ impl SwhidComputer {
         for reference in repo.references()? {
             let reference = reference?;
             let name = reference.name().unwrap_or("").as_bytes().to_vec();
-            
+
             if let Some(symbolic_target) = reference.symbolic_target() {
-                // For symbolic references, we need to resolve the target
-                if let Ok(target_ref) = repo.find_reference(symbolic_target) {
-                    if let Some(target) = target_ref.target() {
-                        let target_id = target.as_bytes();
-                        if target_id.len() == 20 {
-                            let mut target_array = [0u8; 20];
-                            target_array.copy_from_slice(&target_id);
-                            let branch = SnapshotBranch::new(target_array, SnapshotTargetType::Alias);
-                            branches.insert(name, Some(branch));
-                        }
-                    }
-                }
+                // For symbolic references, the alias target is the name of the target branch as raw bytes
+                let alias_target_bytes = symbolic_target.as_bytes().to_vec();
+                let branch = SnapshotBranch::new(alias_target_bytes, SnapshotTargetType::Alias);
+                branches.insert(name, Some(branch));
             }
         }
 
@@ -310,7 +382,6 @@ impl SwhidComputer {
 mod tests {
     use super::*;
     use std::fs;
-    use std::fs::File;
     use tempfile::TempDir;
 
     #[test]

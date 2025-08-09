@@ -47,19 +47,19 @@ impl std::fmt::Display for SnapshotTargetType {
 /// Represents a snapshot branch
 #[derive(Debug, Clone)]
 pub struct SnapshotBranch {
-    pub target: [u8; 20],
+    pub target: Vec<u8>,
     pub target_type: SnapshotTargetType,
 }
 
 impl SnapshotBranch {
-    pub fn new(target: [u8; 20], target_type: SnapshotTargetType) -> Self {
+    pub fn new(target: Vec<u8>, target_type: SnapshotTargetType) -> Self {
         Self {
             target,
             target_type,
         }
     }
 
-    pub fn target(&self) -> &[u8; 20] {
+    pub fn target(&self) -> &[u8] {
         &self.target
     }
 
@@ -76,7 +76,13 @@ impl SnapshotBranch {
             SnapshotTargetType::Snapshot => ObjectType::Snapshot,
             SnapshotTargetType::Alias => return None, // Aliases don't have SWHIDs
         };
-        Some(Swhid::new(object_type, self.target))
+        if self.target.len() == 20 {
+            let mut id = [0u8; 20];
+            id.copy_from_slice(&self.target);
+            Some(Swhid::new(object_type, id))
+        } else {
+            None
+        }
     }
 }
 
@@ -101,44 +107,68 @@ impl Snapshot {
     }
 
     pub fn compute_hash(&self) -> [u8; 20] {
-        let manifest = self.to_git_object();
-        crate::hash::hash_git_object("tree", &manifest)
+        let manifest = self.to_git_snapshot_manifest();
+        // Hash using git-like header for the custom "snapshot" type per spec
+        crate::hash::hash_git_object("snapshot", &manifest)
     }
 
-    pub fn to_git_object(&self) -> Vec<u8> {
-        let mut parts = Vec::new();
+    /// Build the snapshot manifest per SWHID v1.2 spec
+    /// Each entry: type SP name NUL len ':' id (or alias target name / empty)
+    pub fn to_git_snapshot_manifest(&self) -> Vec<u8> {
+        let mut manifest = Vec::new();
 
-        // Sort branches by name for deterministic output
+        // Sort branches by name (bytes order)
         let mut sorted_branches: Vec<_> = self.branches.iter().collect();
         sorted_branches.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         for (name, branch_opt) in sorted_branches {
-            if let Some(branch) = branch_opt {
-                // Format: <mode> <type> <hash>\t<name>
-                let mode = match branch.target_type {
-                    SnapshotTargetType::Content => "100644",
-                    SnapshotTargetType::Directory => "040000",
-                    SnapshotTargetType::Revision => "160000",
-                    SnapshotTargetType::Release => "160000",
-                    SnapshotTargetType::Snapshot => "160000",
-                    SnapshotTargetType::Alias => "120000",
-                };
+            match branch_opt {
+                None => {
+                    // Dangling branch
+                    manifest.extend_from_slice(b"dangling");
+                    manifest.push(b' ');
+                    manifest.extend_from_slice(name);
+                    manifest.push(0); // NUL
+                    manifest.extend_from_slice(b"0:");
+                    // No target bytes
+                }
+                Some(branch) => {
+                    let type_str = match branch.target_type {
+                        SnapshotTargetType::Content => b"content".as_ref(),
+                        SnapshotTargetType::Directory => b"directory".as_ref(),
+                        SnapshotTargetType::Revision => b"revision".as_ref(),
+                        SnapshotTargetType::Release => b"release".as_ref(),
+                        SnapshotTargetType::Snapshot => b"snapshot".as_ref(),
+                        SnapshotTargetType::Alias => b"alias".as_ref(),
+                    };
 
-                let object_type = branch.target_type.as_str();
-                let hash = hex::encode(branch.target);
-                let name_str = String::from_utf8_lossy(name);
+                    manifest.extend_from_slice(type_str);
+                    manifest.push(b' ');
+                    manifest.extend_from_slice(name);
+                    manifest.push(0); // NUL
 
-                parts.push(format!("{} {} {}\t{}", mode, object_type, hash, name_str).into_bytes());
+                    match branch.target_type {
+                        SnapshotTargetType::Alias => {
+                            // Alias: store the name of the target branch (raw bytes)
+                            let alias_name = &branch.target;
+                            let len_str = alias_name.len().to_string();
+                            manifest.extend_from_slice(len_str.as_bytes());
+                            manifest.push(b':');
+                            manifest.extend_from_slice(alias_name);
+                        }
+                        _ => {
+                            // Non-alias: target is a 20-byte identifier
+                            let len_str = b"20";
+                            manifest.extend_from_slice(len_str);
+                            manifest.push(b':');
+                            manifest.extend_from_slice(&branch.target);
+                        }
+                    }
+                }
             }
         }
 
-        // Concatenate all parts
-        let mut result = Vec::new();
-        for part in parts {
-            result.extend_from_slice(&part);
-            result.push(b'\n');
-        }
-        result
+        manifest
     }
 
     pub fn swhid(&self) -> Swhid {
@@ -194,7 +224,7 @@ mod tests {
     #[test]
     fn test_snapshot_branch_creation() {
         let target = [0u8; 20];
-        let branch = SnapshotBranch::new(target, SnapshotTargetType::Revision);
+        let branch = SnapshotBranch::new(target.to_vec(), SnapshotTargetType::Revision);
 
         assert_eq!(branch.target(), &target);
         assert_eq!(branch.target_type(), SnapshotTargetType::Revision);
@@ -203,7 +233,7 @@ mod tests {
     #[test]
     fn test_snapshot_branch_swhid() {
         let target = [0u8; 20];
-        let branch = SnapshotBranch::new(target, SnapshotTargetType::Revision);
+        let branch = SnapshotBranch::new(target.to_vec(), SnapshotTargetType::Revision);
 
         let swhid = branch.swhid().unwrap();
         assert_eq!(swhid.object_type(), ObjectType::Revision);
@@ -213,7 +243,7 @@ mod tests {
     #[test]
     fn test_snapshot_branch_alias_no_swhid() {
         let target = [0u8; 20];
-        let branch = SnapshotBranch::new(target, SnapshotTargetType::Alias);
+        let branch = SnapshotBranch::new(target.to_vec(), SnapshotTargetType::Alias);
 
         assert_eq!(branch.swhid(), None);
     }
@@ -221,7 +251,7 @@ mod tests {
     #[test]
     fn test_snapshot_creation() {
         let mut branches = HashMap::new();
-        let branch = SnapshotBranch::new([0u8; 20], SnapshotTargetType::Revision);
+        let branch = SnapshotBranch::new([0u8; 20].to_vec(), SnapshotTargetType::Revision);
         branches.insert(b"main".to_vec(), Some(branch));
 
         let snapshot = Snapshot::new(branches);
@@ -245,7 +275,7 @@ mod tests {
         let branches = HashMap::new();
         let mut snapshot = Snapshot::new(branches);
 
-        let branch = SnapshotBranch::new([1u8; 20], SnapshotTargetType::Revision);
+        let branch = SnapshotBranch::new([1u8; 20].to_vec(), SnapshotTargetType::Revision);
         snapshot.add_branch(b"main".to_vec(), branch);
 
         assert_eq!(snapshot.branches().len(), 1);
@@ -255,7 +285,7 @@ mod tests {
     #[test]
     fn test_snapshot_remove_branch() {
         let mut branches = HashMap::new();
-        let branch = SnapshotBranch::new([0u8; 20], SnapshotTargetType::Revision);
+        let branch = SnapshotBranch::new([0u8; 20].to_vec(), SnapshotTargetType::Revision);
         branches.insert(b"main".to_vec(), Some(branch));
 
         let mut snapshot = Snapshot::new(branches);
