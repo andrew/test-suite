@@ -1,0 +1,184 @@
+[
+  {
+    "payload_name": "empty_file",
+    "payload_path": "test_harness/payloads/content/empty.txt",
+    "all_match": true,
+    "expected_swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.060949087142944336,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.08706784248352051,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.0023224353790283203,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "hello_world",
+    "payload_path": "test_harness/payloads/content/hello.txt",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.06162905693054199,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.0831441879272461,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.0032525062561035156,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "unicode_text",
+    "payload_path": "test_harness/payloads/content/unicode.txt",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.05970335006713867,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.08266520500183105,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.004069805145263672,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "truly_empty",
+    "payload_path": "test_harness/payloads/content/truly_empty.txt",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.06404638290405273,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.08228302001953125,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.002228260040283203,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "empty_dir",
+    "payload_path": "test_harness/payloads/directory/empty/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "error": null,
+        "duration": 0.062131643295288086,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "error": null,
+        "duration": 0.08106064796447754,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": null,
+        "error": "Git directory SWHID not implemented yet",
+        "duration": 0.0001609325408935547,
+        "success": false
+      }
+    }
+  },
+  {
+    "payload_name": "simple_dir",
+    "payload_path": "test_harness/payloads/directory/simple/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:6ccd5eb21381ddb5d8a152d39f5b3d22d4c200cd",
+        "error": null,
+        "duration": 0.06280684471130371,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:dir:6ccd5eb21381ddb5d8a152d39f5b3d22d4c200cd",
+        "error": null,
+        "duration": 0.0824437141418457,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": null,
+        "error": "Git directory SWHID not implemented yet",
+        "duration": 2.0503997802734375e-05,
+        "success": false
+      }
+    }
+  },
+  {
+    "payload_name": "nested_dir",
+    "payload_path": "test_harness/payloads/directory/nested/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:8743ee5a3f8bd2b59794ede107e5cac04f8b0512",
+        "error": null,
+        "duration": 0.06227564811706543,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:dir:8743ee5a3f8bd2b59794ede107e5cac04f8b0512",
+        "error": null,
+        "duration": 0.08047676086425781,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": null,
+        "error": "Git directory SWHID not implemented yet",
+        "duration": 2.0742416381835938e-05,
+        "success": false
+      }
+    }
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "payload_name": "empty_dir",
+    "payload_path": "test_harness/payloads/directory/empty/",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "error": null,
+        "duration": 0.06256270408630371,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "simple_dir",
+    "payload_path": "test_harness/payloads/directory/simple/",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:6ccd5eb21381ddb5d8a152d39f5b3d22d4c200cd",
+        "error": null,
+        "duration": 0.061780452728271484,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "nested_dir",
+    "payload_path": "test_harness/payloads/directory/nested/",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:8743ee5a3f8bd2b59794ede107e5cac04f8b0512",
+        "error": null,
+        "duration": 0.06172060966491699,
+        "success": true
+      }
+    }
+  }
+]

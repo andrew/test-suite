@@ -1,0 +1,2 @@
+This is file 3 in a nested subdirectory.
+Testing nested directory SWHID computation.

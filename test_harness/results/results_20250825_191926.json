@@ -1,0 +1,106 @@
+[
+  {
+    "payload_name": "empty_file",
+    "payload_path": "test_harness/payloads/content/empty.txt",
+    "all_match": false,
+    "expected_swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.06302404403686523,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73\ttest_harness/payloads/content/empty.txt",
+        "error": null,
+        "duration": 0.08747124671936035,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.0019969940185546875,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "hello_world",
+    "payload_path": "test_harness/payloads/content/hello.txt",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.0667874813079834,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d\ttest_harness/payloads/content/hello.txt",
+        "error": null,
+        "duration": 0.08858466148376465,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.002620220184326172,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "unicode_text",
+    "payload_path": "test_harness/payloads/content/unicode.txt",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.059816837310791016,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77\ttest_harness/payloads/content/unicode.txt",
+        "error": null,
+        "duration": 0.08532214164733887,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.002068042755126953,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "truly_empty",
+    "payload_path": "test_harness/payloads/content/truly_empty.txt",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.06050753593444824,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb\ttest_harness/payloads/content/truly_empty.txt",
+        "error": null,
+        "duration": 0.08911442756652832,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.0017597675323486328,
+        "success": true
+      }
+    }
+  }
+]

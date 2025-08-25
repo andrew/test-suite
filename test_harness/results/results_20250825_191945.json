@@ -1,0 +1,80 @@
+[
+  {
+    "payload_name": "empty_dir",
+    "payload_path": "test_harness/payloads/directory/empty/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "error": null,
+        "duration": 0.06148672103881836,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "error": null,
+        "duration": 0.0892333984375,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": null,
+        "error": "Git directory SWHID not implemented yet",
+        "duration": 3.24249267578125e-05,
+        "success": false
+      }
+    }
+  },
+  {
+    "payload_name": "simple_dir",
+    "payload_path": "test_harness/payloads/directory/simple/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:6ccd5eb21381ddb5d8a152d39f5b3d22d4c200cd",
+        "error": null,
+        "duration": 0.06205463409423828,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:dir:6ccd5eb21381ddb5d8a152d39f5b3d22d4c200cd",
+        "error": null,
+        "duration": 0.08384251594543457,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": null,
+        "error": "Git directory SWHID not implemented yet",
+        "duration": 3.218650817871094e-05,
+        "success": false
+      }
+    }
+  },
+  {
+    "payload_name": "nested_dir",
+    "payload_path": "test_harness/payloads/directory/nested/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:dir:8743ee5a3f8bd2b59794ede107e5cac04f8b0512",
+        "error": null,
+        "duration": 0.06006217002868652,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": "swh:1:dir:8743ee5a3f8bd2b59794ede107e5cac04f8b0512",
+        "error": null,
+        "duration": 0.08319568634033203,
+        "success": true
+      },
+      "git-cmd": {
+        "swhid": null,
+        "error": "Git directory SWHID not implemented yet",
+        "duration": 2.1457672119140625e-05,
+        "success": false
+      }
+    }
+  }
+]

@@ -1,1 +1,2 @@
-This is file 2 in the simple directory. 
+This is file 2 in the simple directory.
+Another file for testing directory SWHID computation. 

@@ -1,0 +1,106 @@
+[
+  {
+    "payload_name": "empty_file",
+    "payload_path": "test_harness/payloads/content/empty.txt",
+    "all_match": false,
+    "expected_swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.06124734878540039,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": null,
+        "error": "Python implementation failed: Usage: python -m swh.model.cli [OPTIONS] OBJECTS...\nTry 'python -m swh.model.cli -h' for help.\n\nError: Invalid value: cannot detect object type for swhid\n",
+        "duration": 0.08301353454589844,
+        "success": false
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:0519ecba6ea913e21689ec692e81e9e4973fbf73",
+        "error": null,
+        "duration": 0.00226593017578125,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "hello_world",
+    "payload_path": "test_harness/payloads/content/hello.txt",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.06796574592590332,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": null,
+        "error": "Python implementation failed: Usage: python -m swh.model.cli [OPTIONS] OBJECTS...\nTry 'python -m swh.model.cli -h' for help.\n\nError: Invalid value: cannot detect object type for swhid\n",
+        "duration": 0.09525775909423828,
+        "success": false
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:f732d2ae1a449d8204f266b59bb35cb4eb0e899d",
+        "error": null,
+        "duration": 0.0030226707458496094,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "unicode_text",
+    "payload_path": "test_harness/payloads/content/unicode.txt",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.061012983322143555,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": null,
+        "error": "Python implementation failed: Usage: python -m swh.model.cli [OPTIONS] OBJECTS...\nTry 'python -m swh.model.cli -h' for help.\n\nError: Invalid value: cannot detect object type for swhid\n",
+        "duration": 0.08291435241699219,
+        "success": false
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:beb5a5fcf34520ac50e3065cbe867f556a564a77",
+        "error": null,
+        "duration": 0.002127408981323242,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "truly_empty",
+    "payload_path": "test_harness/payloads/content/truly_empty.txt",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "rust-minimal": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.06531238555908203,
+        "success": true
+      },
+      "python-swh-model": {
+        "swhid": null,
+        "error": "Python implementation failed: Usage: python -m swh.model.cli [OPTIONS] OBJECTS...\nTry 'python -m swh.model.cli -h' for help.\n\nError: Invalid value: cannot detect object type for swhid\n",
+        "duration": 0.08198046684265137,
+        "success": false
+      },
+      "git-cmd": {
+        "swhid": "swh:1:cnt:b28b04f643122b019e912540f228c8ed20be9eeb",
+        "error": null,
+        "duration": 0.0024542808532714844,
+        "success": true
+      }
+    }
+  }
+]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SWHID Testing Harness
+SWHID Testing Harness for Minimal Implementation
 
-A technology-neutral testing harness for comparing different SWHID implementations
-on standardized test payloads.
+A simplified testing harness for comparing SWHID implementations
+on standardized test payloads, adapted for the minimal implementation.
 """
 
 import argparse
@@ -15,11 +15,9 @@ import yaml
 import subprocess
 import tempfile
 import shutil
-import importlib.util
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 # Configure logging
@@ -47,9 +45,9 @@ class ComparisonResult:
     expected_swhid: Optional[str]
 
 class SwhidHarness:
-    """Main testing harness for SWHID implementations."""
+    """Simplified testing harness for SWHID implementations."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "test_harness/config.yaml"):
         self.config_path = config_path
         self.config = self._load_config()
         self.results_dir = Path(self.config["output"]["results_dir"])
@@ -60,31 +58,41 @@ class SwhidHarness:
         with open(self.config_path, 'r') as f:
             return yaml.safe_load(f)
     
-    def _get_runner(self, implementation: str) -> str:
-        """Get the runner script for an implementation."""
-        impl_config = self.config["implementations"][implementation]
-        return impl_config["runner"]
-    
-    def _run_single_test(self, implementation: str, payload_path: str, 
-                         payload_name: str) -> TestResult:
-        """Run a single test for one implementation."""
+    def _run_rust_test(self, payload_path: str, payload_name: str) -> TestResult:
+        """Run test using our Rust implementation."""
         start_time = time.time()
         
         try:
-            # Import the runner module
-            runner_path = self._get_runner(implementation)
-            spec = importlib.util.spec_from_file_location("runner", runner_path)
-            runner_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(runner_module)
+            # Use our CLI to compute SWHID
+            cmd = ["cargo", "run", "--bin", "swhid-cli", "--", payload_path]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.dirname(__file__)),  # Go to project root
+                timeout=30
+            )
             
-            # Run the test
-            swhid = runner_module.compute_swhid(payload_path)
+            if result.returncode != 0:
+                raise RuntimeError(f"Rust implementation failed: {result.stderr}")
+            
+            # Parse the output
+            output = result.stdout.strip()
+            if not output:
+                raise RuntimeError("No output from Rust implementation")
+            
+            # The output format is: SWHID\tfilename (optional)
+            swhid = output.split('\t')[0].strip()
+            
+            if not swhid.startswith("swh:"):
+                raise RuntimeError(f"Invalid SWHID format: {swhid}")
+            
             duration = time.time() - start_time
             
             return TestResult(
                 payload_name=payload_name,
                 payload_path=payload_path,
-                implementation=implementation,
+                implementation="rust-minimal",
                 swhid=swhid,
                 error=None,
                 duration=duration,
@@ -96,7 +104,116 @@ class SwhidHarness:
             return TestResult(
                 payload_name=payload_name,
                 payload_path=payload_path,
-                implementation=implementation,
+                implementation="rust-minimal",
+                swhid=None,
+                error=str(e),
+                duration=duration,
+                success=False
+            )
+    
+    def _run_python_test(self, payload_path: str, payload_name: str) -> TestResult:
+        """Run test using Python swh-model implementation."""
+        start_time = time.time()
+        
+        try:
+            # Use Python swh-model CLI with --no-filename for clean output
+            cmd = ["python", "-m", "swh.model.cli", "--no-filename", payload_path]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                raise RuntimeError(f"Python implementation failed: {result.stderr}")
+            
+            # Parse the output (now just the SWHID without filename)
+            output = result.stdout.strip()
+            if not output:
+                raise RuntimeError("No output from Python implementation")
+            
+            # Extract SWHID from output (should be just the SWHID now)
+            lines = output.split('\n')
+            swhid = None
+            for line in lines:
+                if line.startswith("swh:"):
+                    swhid = line.strip()
+                    break
+            
+            if not swhid:
+                raise RuntimeError("No SWHID found in Python output")
+            
+            duration = time.time() - start_time
+            
+            return TestResult(
+                payload_name=payload_name,
+                payload_path=payload_path,
+                implementation="python-swh-model",
+                swhid=swhid,
+                error=None,
+                duration=duration,
+                success=True
+            )
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            return TestResult(
+                payload_name=payload_name,
+                payload_path=payload_path,
+                implementation="python-swh-model",
+                swhid=None,
+                error=str(e),
+                duration=duration,
+                success=False
+            )
+    
+    def _run_git_test(self, payload_path: str, payload_name: str) -> TestResult:
+        """Run test using Git command line."""
+        start_time = time.time()
+        
+        try:
+            # Use git hash-object for content
+            if os.path.isfile(payload_path):
+                cmd = ["git", "hash-object", payload_path]
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode != 0:
+                    raise RuntimeError(f"Git implementation failed: {result.stderr}")
+                
+                git_hash = result.stdout.strip()
+                swhid = f"swh:1:cnt:{git_hash}"
+                
+            elif os.path.isdir(payload_path):
+                # For directories, we need to create a tree
+                # This is more complex, so we'll skip for now
+                raise RuntimeError("Git directory SWHID not implemented yet")
+            else:
+                raise RuntimeError(f"Payload is neither file nor directory: {payload_path}")
+            
+            duration = time.time() - start_time
+            
+            return TestResult(
+                payload_name=payload_name,
+                payload_path=payload_path,
+                implementation="git-cmd",
+                swhid=swhid,
+                error=None,
+                duration=duration,
+                success=True
+            )
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            return TestResult(
+                payload_name=payload_name,
+                payload_path=payload_path,
+                implementation="git-cmd",
                 swhid=None,
                 error=str(e),
                 duration=duration,
@@ -141,11 +258,10 @@ class SwhidHarness:
                   categories: Optional[List[str]] = None) -> List[ComparisonResult]:
         """Run tests for specified implementations and categories."""
         if implementations is None:
-            implementations = [k for k, v in self.config["implementations"].items() 
-                            if v.get("enabled", True)]
+            implementations = ["rust-minimal", "python-swh-model", "git-cmd"]
         
         if categories is None:
-            categories = list(self.config["payloads"].keys())
+            categories = ["content", "directory"]
         
         all_results = []
         
@@ -161,16 +277,7 @@ class SwhidHarness:
                 payload_name = payload["name"]
                 expected_swhid = payload.get("expected_swhid")
                 
-                # Ensure git payloads exist by creating synthetic repos on-the-fly
-                if category == "git" and not os.path.exists(payload_path):
-                    try:
-                        self._create_minimal_git_repo(payload_path)
-                        logger.info(f"Created synthetic git payload at: {payload_path}")
-                    except Exception as e:
-                        logger.warning(f"Payload not found: {payload_path}")
-                        logger.debug(f"Failed to create git payload: {e}")
-                        continue
-                elif not os.path.exists(payload_path):
+                if not os.path.exists(payload_path):
                     logger.warning(f"Payload not found: {payload_path}")
                     continue
                 
@@ -178,19 +285,18 @@ class SwhidHarness:
                 
                 # Run tests for all implementations
                 results = {}
-                with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
-                    future_to_impl = {
-                        executor.submit(self._run_single_test, impl, payload_path, payload_name): impl
-                        for impl in implementations
-                    }
-                    
-                    for future in as_completed(future_to_impl):
-                        impl = future_to_impl[future]
-                        try:
-                            result = future.result()
-                            results[impl] = result
-                        except Exception as e:
-                            logger.error(f"Error running test for {impl}: {e}")
+                
+                # Run Rust test
+                if "rust-minimal" in implementations:
+                    results["rust-minimal"] = self._run_rust_test(payload_path, payload_name)
+                
+                # Run Python test
+                if "python-swh-model" in implementations:
+                    results["python-swh-model"] = self._run_python_test(payload_path, payload_name)
+                
+                # Run Git test
+                if "git-cmd" in implementations:
+                    results["git-cmd"] = self._run_git_test(payload_path, payload_name)
                 
                 # Compare results
                 comparison = self._compare_results(payload_name, payload_path, results, expected_swhid)
@@ -199,135 +305,53 @@ class SwhidHarness:
                 # Log results
                 if comparison.all_match:
                     logger.info(f"✓ {payload_name}: All implementations match")
+                    for impl, result in results.items():
+                        logger.info(f"  {impl}: {result.swhid} ({result.duration:.3f}s)")
                 else:
                     logger.error(f"✗ {payload_name}: Implementations differ")
                     for impl, result in results.items():
                         if result.success:
-                            logger.info(f"  {impl}: {result.swhid}")
+                            logger.error(f"  {impl}: {result.swhid} ({result.duration:.3f}s)")
                         else:
-                            logger.error(f"  {impl}: Error - {result.error}")
+                            logger.error(f"  {impl}: ERROR - {result.error}")
         
         return all_results
-
-    def _create_minimal_git_repo(self, repo_path: str):
-        """Create a small git repository with one commit, one tag, and default HEAD.
-        This is used to test snapshot identifiers.
-        """
-        import subprocess
-        import pathlib
-        path = pathlib.Path(repo_path)
-        path.mkdir(parents=True, exist_ok=True)
-
-        # Initialize repo
-        subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
-        # Configure user
-        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_path, check=True)
-        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True)
-        # Create a file and commit
-        (path / "README.md").write_text("# Sample Repo\n")
-        subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True)
-        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True, capture_output=True)
-        # Create a branch 'feature'
-        subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo_path, check=True, capture_output=True)
-        (path / "FEATURE.txt").write_text("feature\n")
-        subprocess.run(["git", "add", "FEATURE.txt"], cwd=repo_path, check=True)
-        subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True, capture_output=True)
-        # Switch back to main
-        subprocess.run(["git", "checkout", "-B", "main"], cwd=repo_path, check=True, capture_output=True)
-        # Create an annotated tag
-        subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True, capture_output=True)
     
-    def generate_expected_results(self, implementation: str = "python"):
-        """Generate expected results using a reference implementation."""
-        logger.info(f"Generating expected results using {implementation}")
-        
-        for category, payloads in self.config["payloads"].items():
-            for payload in payloads:
-                payload_path = payload["path"]
-                payload_name = payload["name"]
-                
-                if not os.path.exists(payload_path):
-                    continue
-                
-                try:
-                    # Run the reference implementation
-                    runner_path = self._get_runner(implementation)
-                    spec = importlib.util.spec_from_file_location("runner", runner_path)
-                    runner_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(runner_module)
-                    
-                    swhid = runner_module.compute_swhid(payload_path)
-                    
-                    # Update the config with expected SWHID
-                    payload["expected_swhid"] = swhid
-                    logger.info(f"Generated expected SWHID for {payload_name}: {swhid}")
-                    
-                except Exception as e:
-                    logger.error(f"Error generating expected result for {payload_name}: {e}")
-        
-        # Save updated config
-        with open(self.config_path, 'w') as f:
-            yaml.dump(self.config, f, default_flow_style=False)
-    
-    def save_results(self, results: List[ComparisonResult], output_format: str = "json"):
+    def save_results(self, results: List[ComparisonResult], filename: str = None):
         """Save test results to file."""
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        if filename is None:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"results_{timestamp}.json"
         
-        if output_format == "json":
-            output_file = self.results_dir / f"results_{timestamp}.json"
+        filepath = self.results_dir / filename
+        
+        # Convert results to serializable format
+        serializable_results = []
+        for result in results:
+            serializable_result = {
+                "payload_name": result.payload_name,
+                "payload_path": result.payload_path,
+                "all_match": result.all_match,
+                "expected_swhid": result.expected_swhid,
+                "results": {}
+            }
             
-            # Convert results to JSON-serializable format
-            json_results = []
-            for comparison in results:
-                json_comparison = {
-                    "payload_name": comparison.payload_name,
-                    "payload_path": comparison.payload_path,
-                    "all_match": comparison.all_match,
-                    "expected_swhid": comparison.expected_swhid,
-                    "results": {}
+            for impl, test_result in result.results.items():
+                serializable_result["results"][impl] = {
+                    "swhid": test_result.swhid,
+                    "error": test_result.error,
+                    "duration": test_result.duration,
+                    "success": test_result.success
                 }
-                
-                for impl, result in comparison.results.items():
-                    json_comparison["results"][impl] = {
-                        "swhid": result.swhid,
-                        "error": result.error,
-                        "duration": result.duration,
-                        "success": result.success
-                    }
-                
-                json_results.append(json_comparison)
             
-            with open(output_file, 'w') as f:
-                json.dump(json_results, f, indent=2)
-            
-            logger.info(f"Results saved to {output_file}")
+            serializable_results.append(serializable_result)
         
-        elif output_format == "text":
-            output_file = self.results_dir / f"results_{timestamp}.txt"
-            
-            with open(output_file, 'w') as f:
-                f.write("SWHID Testing Harness Results\n")
-                f.write("=" * 40 + "\n\n")
-                
-                for comparison in results:
-                    f.write(f"Payload: {comparison.payload_name}\n")
-                    f.write(f"Path: {comparison.payload_path}\n")
-                    f.write(f"All Match: {comparison.all_match}\n")
-                    
-                    if comparison.expected_swhid:
-                        f.write(f"Expected: {comparison.expected_swhid}\n")
-                    
-                    f.write("Results:\n")
-                    for impl, result in comparison.results.items():
-                        f.write(f"  {impl}: ")
-                        if result.success:
-                            f.write(f"{result.swhid} ({result.duration:.3f}s)\n")
-                        else:
-                            f.write(f"ERROR - {result.error}\n")
-                    
-                    f.write("\n")
-            
-            logger.info(f"Results saved to {output_file}")
+        # Save to file
+        with open(filepath, 'w') as f:
+            json.dump(serializable_results, f, indent=2)
+        
+        logger.info(f"Results saved to: {filepath}")
+        return filepath
     
     def print_summary(self, results: List[ComparisonResult]):
         """Print a summary of test results."""
@@ -335,44 +359,55 @@ class SwhidHarness:
         successful_tests = sum(1 for r in results if r.all_match)
         failed_tests = total_tests - successful_tests
         
-        print("\n" + "=" * 50)
-        print("SWHID Testing Harness Summary")
-        print("=" * 50)
-        print(f"Total Tests: {total_tests}")
+        print(f"\n{'='*60}")
+        print(f"TEST SUMMARY")
+        print(f"{'='*60}")
+        print(f"Total tests: {total_tests}")
         print(f"Successful: {successful_tests}")
         print(f"Failed: {failed_tests}")
-        print(f"Success Rate: {successful_tests/total_tests*100:.1f}%")
+        print(f"Success rate: {(successful_tests/total_tests)*100:.1f}%")
         
         if failed_tests > 0:
-            print("\nFailed Tests:")
+            print(f"\nFailed tests:")
             for result in results:
                 if not result.all_match:
-                    print(f"  - {result.payload_name}")
+                    print(f"  - {result.payload_name}: {result.payload_path}")
+                    for impl, test_result in result.results.items():
+                        if test_result.success:
+                            print(f"    {impl}: {test_result.swhid}")
+                        else:
+                            print(f"    {impl}: ERROR - {test_result.error}")
         
-        print("=" * 50)
+        print(f"{'='*60}")
 
 def main():
+    """Main entry point."""
     parser = argparse.ArgumentParser(description="SWHID Testing Harness")
-    parser.add_argument("--impl", nargs="+", help="Specific implementations to test")
-    parser.add_argument("--category", nargs="+", help="Specific categories to test")
-    parser.add_argument("--config", default="config.yaml", help="Configuration file")
-    parser.add_argument("--generate-expected", action="store_true", 
-                       help="Generate expected results using reference implementation")
-    parser.add_argument("--output-format", choices=["json", "text"], default="json",
-                       help="Output format for results")
-    parser.add_argument("--reference-impl", default="python",
-                       help="Reference implementation for generating expected results")
+    parser.add_argument("--impl", nargs="+", help="Implementations to test")
+    parser.add_argument("--category", nargs="+", help="Test categories to run")
+    parser.add_argument("--output", help="Output filename for results")
+    parser.add_argument("--config", default="test_harness/config.yaml", help="Config file path")
     
     args = parser.parse_args()
     
+    # Initialize harness
     harness = SwhidHarness(args.config)
     
-    if args.generate_expected:
-        harness.generate_expected_results(args.reference_impl)
+    # Run tests
+    results = harness.run_tests(args.impl, args.category)
+    
+    # Save results
+    if args.output:
+        harness.save_results(results, args.output)
     else:
-        results = harness.run_tests(args.impl, args.category)
-        harness.save_results(results, args.output_format)
-        harness.print_summary(results)
+        harness.save_results(results)
+    
+    # Print summary
+    harness.print_summary(results)
+    
+    # Exit with error code if any tests failed
+    if any(not r.all_match for r in results):
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 
