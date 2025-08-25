@@ -31,21 +31,6 @@ impl Content {
         Ok(Self::from_data(data))
     }
 
-    /// Create content from file path with size limit
-    pub fn from_file_with_limit<P: AsRef<Path>>(path: P, max_length: Option<usize>) -> Result<Self, SwhidError> {
-        let data = fs::read(path)?;
-        
-        if let Some(max_len) = max_length {
-            if data.len() > max_len {
-                return Err(SwhidError::UnsupportedOperation(
-                    format!("Content too large ({} bytes)", data.len())
-                ));
-            }
-        }
-        
-        Ok(Self::from_data(data))
-    }
-
     /// Get the raw data
     pub fn data(&self) -> &[u8] {
         &self.data
@@ -87,20 +72,19 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let data = b"Test file content";
         fs::write(&temp_file, data).unwrap();
-
-        let content = Content::from_file(temp_file.path()).unwrap();
         
+        let content = Content::from_file(&temp_file).unwrap();
         assert_eq!(content.data(), data);
         assert_eq!(content.length(), data.len());
     }
 
     #[test]
     fn test_content_swhid() {
-        let data = b"test";
+        let data = b"Hello, World!";
         let content = Content::from_data(data.to_vec());
         let swhid = content.swhid();
         
         assert_eq!(swhid.object_type(), ObjectType::Content);
-        assert_eq!(swhid.object_id(), content.sha1_git());
+        assert_eq!(swhid.hash(), content.sha1_git());
     }
 } 

@@ -1,0 +1,78 @@
+[
+  {
+    "payload_name": "simple_dir",
+    "payload_path": "payloads/directory/simple/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "git-cmd": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.030252456665039062,
+        "success": true
+      },
+      "pygit2": {
+        "swhid": null,
+        "error": "Failed to compute Git SWHID: failed to insert entry: invalid name for a tree entry - .git",
+        "duration": 0.05265378952026367,
+        "success": false
+      },
+      "rust": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.09920597076416016,
+        "success": true
+      },
+      "git": {
+        "swhid": "swh:1:dir:7a13cfb2a6480a806ef3577599e4abc3c35ec95e",
+        "error": null,
+        "duration": 0.09943079948425293,
+        "success": true
+      },
+      "python": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.10994577407836914,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "nested_dir",
+    "payload_path": "payloads/directory/nested/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "git-cmd": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.018931865692138672,
+        "success": true
+      },
+      "pygit2": {
+        "swhid": null,
+        "error": "Failed to compute Git SWHID: failed to insert entry: invalid name for a tree entry - .git",
+        "duration": 0.00756072998046875,
+        "success": false
+      },
+      "git": {
+        "swhid": "swh:1:dir:125a5d139ee956b7fa44bfb74e3fc043256cc57a",
+        "error": null,
+        "duration": 0.040261030197143555,
+        "success": true
+      },
+      "python": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.09018802642822266,
+        "success": true
+      },
+      "rust": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.10044312477111816,
+        "success": true
+      }
+    }
+  }
+]

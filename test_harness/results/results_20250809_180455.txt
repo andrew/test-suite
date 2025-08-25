@@ -1,0 +1,10 @@
+SWHID Testing Harness Results
+========================================
+
+Payload: synthetic_repo
+Path: payloads/git/synthetic/
+All Match: False
+Results:
+  python: swh:1:snp:cd862a5cf486f70c47121f1874031dbdc8c0e370 (0.101s)
+  rust: swh:1:snp:bc5e402bb4dd69d73c667a3226ad8ee069eceea6 (0.113s)
+

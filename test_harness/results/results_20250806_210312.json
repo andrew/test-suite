@@ -1,0 +1,66 @@
+[
+  {
+    "payload_name": "simple_dir",
+    "payload_path": "payloads/directory/simple/",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "git-cmd": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.024512767791748047,
+        "success": true
+      },
+      "git": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.032666683197021484,
+        "success": true
+      },
+      "python": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.08813977241516113,
+        "success": true
+      },
+      "rust": {
+        "swhid": "swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1",
+        "error": null,
+        "duration": 0.10368013381958008,
+        "success": true
+      }
+    }
+  },
+  {
+    "payload_name": "nested_dir",
+    "payload_path": "payloads/directory/nested/",
+    "all_match": true,
+    "expected_swhid": null,
+    "results": {
+      "git-cmd": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.014286518096923828,
+        "success": true
+      },
+      "git": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.014682769775390625,
+        "success": true
+      },
+      "rust": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.1269087791442871,
+        "success": true
+      },
+      "python": {
+        "swhid": "swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a",
+        "error": null,
+        "duration": 0.12662172317504883,
+        "success": true
+      }
+    }
+  }
+]

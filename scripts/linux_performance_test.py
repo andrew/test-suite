@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Simplified performance test for Linux source code
-Tests the main implementations: Rust, Python, and Git command
+Tests the main implementations: Rust, Python, Git command, and Dulwich
 """
 
 import time
 import subprocess
 import sys
 import os
+import tempfile
+import shutil
 from pathlib import Path
 
 def test_rust_implementation(test_dir, num_runs=3):
@@ -120,23 +122,25 @@ def test_git_implementation(test_dir, num_runs=3):
     for i in range(num_runs):
         start_time = time.time()
         try:
-            # Create temporary git repo and add files
-            import tempfile
-            import shutil
-            
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Copy files to temp dir (excluding .git)
-                for item in os.listdir(test_dir):
-                    src = os.path.join(test_dir, item)
-                    dst = os.path.join(temp_dir, item)
-                    if os.path.isdir(src) and item != '.git':
-                        shutil.copytree(src, dst, symlinks=False)
-                    elif os.path.isfile(src):
-                        shutil.copy2(src, dst)
+                # Initialize Git repository
+                subprocess.run(["git", "init"], cwd=temp_dir, check=True)
                 
-                # Initialize git repo and add files
-                subprocess.run(["git", "init"], cwd=temp_dir, check=True, capture_output=True)
-                subprocess.run(["git", "add", "."], cwd=temp_dir, check=True, capture_output=True)
+                # Copy directory contents
+                if os.path.isdir(test_dir):
+                    for root, dirs, files in os.walk(test_dir):
+                        rel_path = os.path.relpath(root, test_dir)
+                        repo_dir = os.path.join(temp_dir, rel_path)
+                        os.makedirs(repo_dir, exist_ok=True)
+                        
+                        for file in files:
+                            src_file = os.path.join(root, file)
+                            dst_file = os.path.join(repo_dir, file)
+                            if os.path.isfile(src_file):
+                                shutil.copy2(src_file, dst_file)
+                
+                # Add all files to Git
+                subprocess.run(["git", "add", "."], cwd=temp_dir, check=True)
                 
                 # Get tree hash
                 result = subprocess.run(
@@ -163,6 +167,42 @@ def test_git_implementation(test_dir, num_runs=3):
         max_time = max(times)
         print(f"  Average: {avg_time:.3f}s (min: {min_time:.3f}s, max: {max_time:.3f}s)")
         return avg_time, 1  # Git only returns one hash
+    else:
+        print("  All runs failed")
+        return None, 0
+
+def test_dulwich_implementation(test_dir, num_runs=1):
+    """Test Dulwich implementation performance (much slower, so fewer runs)"""
+    print(f"Testing Dulwich implementation on {test_dir}...")
+    print(f"  Note: Dulwich is significantly slower, running only {num_runs} test(s)")
+    times = []
+    
+    for i in range(num_runs):
+        start_time = time.time()
+        try:
+            # Use the harness runner for Dulwich
+            result = subprocess.run(
+                ["python", "test_harness/runners/git_runner.py", test_dir, "directory"],
+                capture_output=True, text=True, timeout=3600  # 1 hour timeout for Dulwich
+            )
+            if result.returncode == 0:
+                end_time = time.time()
+                elapsed = end_time - start_time
+                times.append(elapsed)
+                print(f"  Run {i+1}: {elapsed:.3f}s")
+            else:
+                print(f"  Run {i+1}: FAILED - {result.stderr}")
+        except subprocess.TimeoutExpired:
+            print(f"  Run {i+1}: TIMEOUT (after 1 hour)")
+        except Exception as e:
+            print(f"  Run {i+1}: ERROR - {e}")
+    
+    if times:
+        avg_time = sum(times) / len(times)
+        min_time = min(times)
+        max_time = max(times)
+        print(f"  Average: {avg_time:.3f}s (min: {min_time:.3f}s, max: {max_time:.3f}s)")
+        return avg_time, 1  # Dulwich only returns one hash
     else:
         print("  All runs failed")
         return None, 0
@@ -209,6 +249,13 @@ def main():
     git_time, git_objects = test_git_implementation(test_dir)
     if git_time:
         results['Git'] = {'time': git_time, 'objects': git_objects}
+    
+    print()
+    
+    # Test Dulwich implementation (much slower)
+    dulwich_time, dulwich_objects = test_dulwich_implementation(test_dir)
+    if dulwich_time:
+        results['Dulwich'] = {'time': dulwich_time, 'objects': dulwich_objects}
     
     print()
     print("=" * 60)

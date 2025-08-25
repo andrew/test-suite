@@ -1,0 +1,25 @@
+SWHID Testing Harness Results
+========================================
+
+Payload: simple_dir
+Path: payloads/directory/simple/
+All Match: False
+Results:
+  rust-lib: swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1 (0.004s)
+  git-cmd: swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1 (0.021s)
+  pygit2: ERROR - Failed to compute Git SWHID: failed to insert entry: invalid name for a tree entry - .git
+  git: swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1 (0.051s)
+  python: swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1 (0.089s)
+  rust: swh:1:dir:3f09c252c646f8ac591d60e02e41ab09274de7c1 (0.096s)
+
+Payload: nested_dir
+Path: payloads/directory/nested/
+All Match: False
+Results:
+  rust-lib: swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a (0.003s)
+  git-cmd: swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a (0.007s)
+  pygit2: ERROR - Failed to compute Git SWHID: failed to insert entry: invalid name for a tree entry - .git
+  git: swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a (0.015s)
+  python: swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a (0.082s)
+  rust: swh:1:dir:0bbbf9c7f265450b510251ff215a729f062a763a (0.085s)
+

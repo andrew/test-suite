@@ -1,5 +1,4 @@
 use std::io;
-use hex::FromHexError;
 
 #[derive(Debug)]
 pub enum SwhidError {
@@ -16,8 +15,6 @@ pub enum SwhidError {
     InvalidQualifier(String),
     InvalidQualifierValue(String),
     UnknownQualifier(String),
-    Git(git2::Error),
-    Archive(String),
     InvalidInput(String),
 }
 
@@ -27,49 +24,23 @@ impl From<io::Error> for SwhidError {
     }
 }
 
-impl From<FromHexError> for SwhidError {
-    fn from(err: FromHexError) -> Self {
-        SwhidError::InvalidHash(err.to_string())
-    }
-}
-
-impl From<git2::Error> for SwhidError {
-    fn from(err: git2::Error) -> Self {
-        SwhidError::Git(err)
-    }
-}
-
-impl From<zip::result::ZipError> for SwhidError {
-    fn from(err: zip::result::ZipError) -> Self {
-        SwhidError::Archive(err.to_string())
-    }
-}
-
-impl From<tempfile::PersistError> for SwhidError {
-    fn from(err: tempfile::PersistError) -> Self {
-        SwhidError::Io(err.error)
-    }
-}
-
 impl std::fmt::Display for SwhidError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SwhidError::Io(err) => write!(f, "I/O error: {}", err),
-            SwhidError::InvalidFormat(msg) => write!(f, "Invalid format: {}", msg),
-            SwhidError::InvalidNamespace(ns) => write!(f, "Invalid namespace: {}", ns),
-            SwhidError::InvalidVersion(ver) => write!(f, "Invalid version: {}", ver),
-            SwhidError::InvalidObjectType(ot) => write!(f, "Invalid object type: {}", ot),
-            SwhidError::InvalidHash(hash) => write!(f, "Invalid hash: {}", hash),
-            SwhidError::InvalidHashLength(len) => write!(f, "Invalid hash length: {} (expected 20)", len),
-            SwhidError::InvalidPath(path) => write!(f, "Invalid path: {}", path),
-            SwhidError::DuplicateEntry(entry) => write!(f, "Duplicate entry: {}", entry),
-            SwhidError::UnsupportedOperation(op) => write!(f, "Unsupported operation: {}", op),
-            SwhidError::InvalidQualifier(qual) => write!(f, "Invalid qualifier: {}", qual),
-            SwhidError::InvalidQualifierValue(val) => write!(f, "Invalid qualifier value: {}", val),
-            SwhidError::UnknownQualifier(qual) => write!(f, "Unknown qualifier: {}", qual),
-            SwhidError::Git(err) => write!(f, "Git error: {}", err),
-            SwhidError::Archive(err) => write!(f, "Archive error: {}", err),
-            SwhidError::InvalidInput(err) => write!(f, "Invalid input: {}", err),
+            SwhidError::Io(e) => write!(f, "I/O error: {}", e),
+            SwhidError::InvalidFormat(s) => write!(f, "Invalid format: {}", s),
+            SwhidError::InvalidNamespace(s) => write!(f, "Invalid namespace: {}", s),
+            SwhidError::InvalidVersion(s) => write!(f, "Invalid version: {}", s),
+            SwhidError::InvalidObjectType(s) => write!(f, "Invalid object type: {}", s),
+            SwhidError::InvalidHash(s) => write!(f, "Invalid hash: {}", s),
+            SwhidError::InvalidHashLength(len) => write!(f, "Invalid hash length: {} (expected 40)", len),
+            SwhidError::InvalidPath(s) => write!(f, "Invalid path: {}", s),
+            SwhidError::DuplicateEntry(s) => write!(f, "Duplicate entry: {}", s),
+            SwhidError::UnsupportedOperation(s) => write!(f, "Unsupported operation: {}", s),
+            SwhidError::InvalidQualifier(s) => write!(f, "Invalid qualifier: {}", s),
+            SwhidError::InvalidQualifierValue(s) => write!(f, "Invalid qualifier value: {}", s),
+            SwhidError::UnknownQualifier(s) => write!(f, "Unknown qualifier: {}", s),
+            SwhidError::InvalidInput(s) => write!(f, "Invalid input: {}", s),
         }
     }
 }

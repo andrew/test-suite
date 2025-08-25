@@ -92,8 +92,25 @@ def compute_directory_swhid(dir_path: str) -> str:
         
         # Copy the directory contents maintaining the structure
         if os.path.isdir(dir_path):
-            # Copy the entire directory structure
-            shutil.copytree(dir_path, repo_path, dirs_exist_ok=True)
+            # Copy the entire directory structure, ignoring symlinks
+            for root, dirs, files in os.walk(dir_path):
+                # Create corresponding directory in repo
+                rel_path = os.path.relpath(root, dir_path)
+                repo_dir = os.path.join(repo_path, rel_path)
+                os.makedirs(repo_dir, exist_ok=True)
+                
+                # Copy files, skipping symlinks
+                for file in files:
+                    src_file = os.path.join(root, file)
+                    dst_file = os.path.join(repo_dir, file)
+                    
+                    # Skip symlinks
+                    if os.path.islink(src_file):
+                        continue
+                    
+                    # Copy regular files
+                    if os.path.isfile(src_file):
+                        shutil.copy2(src_file, dst_file)
         else:
             # If it's a file, copy it to the repo root
             shutil.copy2(dir_path, repo_path)

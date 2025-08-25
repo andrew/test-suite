@@ -1,34 +1,20 @@
 [package]
-name = "swhid"
+name = "swhid-core"
 version = "0.1.0"
 edition = "2021"
-description = "Software Heritage Identifier (SWHID) computation library"
+description = "Minimal reference implementation of Software Heritage Identifier (SWHID) computation"
 license = "MIT"
 repository = "https://github.com/your-username/swhid-rs"
-keywords = ["swhid", "software-heritage", "hash", "identifier"]
+keywords = ["swhid", "software-heritage", "hash", "identifier", "reference"]
 categories = ["data-structures", "encoding"]
 
 [dependencies]
 sha1-checked = "0.10"
-sha2 = "0.10"
 hex = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.0", features = ["derive"] }
-git2 = "0.18"
-tar = "0.4"
-zip = "0.6"
-flate2 = "1.0"
-bzip2 = "0.4"
-tempfile = "3.8"
 
 [dev-dependencies]
-
-[[bin]]
-name = "swhid-cli"
-path = "src/main.rs"
+tempfile = "3.8"
 
 [lib]
-name = "swhid"
+name = "swhid_core"
 path = "src/lib.rs" 

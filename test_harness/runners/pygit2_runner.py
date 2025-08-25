@@ -89,17 +89,33 @@ def compute_directory_swhid(dir_path: str) -> str:
         repo_path = os.path.join(temp_dir, "repo")
         repo = pygit2.init_repository(repo_path)
         
-        # Copy the directory contents to the repo
-        target_path = os.path.join(repo_path, "target")
+        # Copy the directory contents maintaining the structure
         if os.path.isdir(dir_path):
-            shutil.copytree(dir_path, target_path)
+            # Copy the entire directory structure, ignoring symlinks
+            for root, dirs, files in os.walk(dir_path):
+                # Create corresponding directory in repo
+                rel_path = os.path.relpath(root, dir_path)
+                repo_dir = os.path.join(repo_path, rel_path)
+                os.makedirs(repo_dir, exist_ok=True)
+                
+                # Copy files, skipping symlinks
+                for file in files:
+                    src_file = os.path.join(root, file)
+                    dst_file = os.path.join(repo_dir, file)
+                    
+                    # Skip symlinks
+                    if os.path.islink(src_file):
+                        continue
+                    
+                    # Copy regular files
+                    if os.path.isfile(src_file):
+                        shutil.copy2(src_file, dst_file)
         else:
-            # If it's a file, create a directory and put the file in it
-            os.makedirs(target_path)
-            shutil.copy2(dir_path, target_path)
+            # If it's a file, copy it to the repo root
+            shutil.copy2(dir_path, repo_path)
         
-        # Create tree for the target directory
-        tree_id = create_git_tree_pygit2(repo, target_path)
+        # Create tree for the root directory
+        tree_id = create_git_tree_pygit2(repo, repo_path)
         tree_id_str = str(tree_id)
         
         return f"swh:1:dir:{tree_id_str}"

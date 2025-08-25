@@ -1,0 +1,30 @@
+[
+  {
+    "payload_name": "simple_dir",
+    "payload_path": "payloads/directory/simple/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "all": {
+        "swhid": null,
+        "error": "'all'",
+        "duration": 4.291534423828125e-06,
+        "success": false
+      }
+    }
+  },
+  {
+    "payload_name": "nested_dir",
+    "payload_path": "payloads/directory/nested/",
+    "all_match": false,
+    "expected_swhid": null,
+    "results": {
+      "all": {
+        "swhid": null,
+        "error": "'all'",
+        "duration": 2.86102294921875e-06,
+        "success": false
+      }
+    }
+  }
+]

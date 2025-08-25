@@ -1,5 +1,4 @@
 use sha1_checked::{Sha1, Digest};
-use sha2::Sha256;
 
 /// Git-style SHA1 hash computation (collision-resistant)
 /// Uses SHA1-checked to prevent SHATTERED-style attacks as required by SWHID spec
@@ -14,13 +13,6 @@ pub fn sha1_git_hash(data: &[u8]) -> [u8; 20] {
 /// Standard SHA1 hash computation (collision-resistant)
 pub fn sha1_hash(data: &[u8]) -> [u8; 20] {
     let mut hasher = Sha1::new();
-    hasher.update(data);
-    hasher.finalize().into()
-}
-
-/// SHA256 hash computation
-pub fn sha256_hash(data: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
     hasher.update(data);
     hasher.finalize().into()
 }
