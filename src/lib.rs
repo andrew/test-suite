@@ -12,16 +12,18 @@
 //! ## Usage
 //! 
 //! ```rust
-//! use swhid_core::{SwhidComputer, Swhid};
+//! use swhid_core::{Swhid, ObjectType};
 //! 
-//! let computer = SwhidComputer::new();
+//! // Create a SWHID manually
+//! let hash = [0u8; 20];
+//! let swhid = Swhid::new(ObjectType::Content, hash);
+//! assert_eq!(swhid.to_string(), "swh:1:cnt:0000000000000000000000000000000000000000");
 //! 
-//! // Compute SWHID for a file
-//! let file_swhid = computer.compute_file_swhid("/path/to/file.txt")?;
-//! 
-//! // Compute SWHID for a directory
-//! let dir_swhid = computer.compute_directory_swhid("/path/to/directory")?;
+//! // Parse a SWHID from string
+//! let parsed = Swhid::from_string("swh:1:dir:0000000000000000000000000000000000000000").unwrap();
+//! assert_eq!(parsed.object_type(), ObjectType::Directory);
 //! ```
+//! 
 
 pub mod swhid;
 pub mod hash;
