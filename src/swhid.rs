@@ -1,7 +1,7 @@
 use std::fmt;
 use crate::error::SwhidError;
 
-/// Software Heritage object types (Core SWHID)
+/// Software Hash object types (Core SWHID)
 /// According to the official SWHID specification v1.6
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectType {
@@ -113,7 +113,7 @@ impl fmt::Display for Swhid {
     }
 }
 
-/// Qualified Software Heritage Identifier
+/// Qualified Software Hash Identifier
 /// Format: swh:1:<object_type>:<hash>[;qualifier=value]*
 /// According to the official SWHID specification v1.6
 #[derive(Debug, Clone, PartialEq, Eq)]

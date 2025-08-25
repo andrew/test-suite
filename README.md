@@ -1,6 +1,6 @@
 # SWHID Core - Minimal Reference Implementation
 
-A minimal, clean reference implementation of Software Heritage Identifier (SWHID) computation in Rust.
+A minimal, clean reference implementation of Software Hash Identifier (SWHID) computation in Rust.
 
 ## Overview
 
@@ -47,7 +47,7 @@ The library also supports **Qualified SWHIDs** with qualifiers according to the 
 ## Features
 
 - **Complete Core SWHID Support**: All 5 core object types from the specification
-- **Qualified SWHID Support**: Full qualifier support (origin, visit, anchor, path, lines)
+- **Qualified SWHID Support**: Full qualifier support (origin, visit, anchor, path, lines, bytes)
 - **Git-compatible**: Uses Git's object format for hashing
 - **Minimal Dependencies**: Only essential crates (sha1-checked, hex)
 - **Reference Implementation**: Clean, readable code for SWHID specification
