@@ -94,3 +94,4 @@ payloads/git-repository/complex_merges/.git/
 
 # Ignore .git directories in git-repository test payloads
 payloads/git-repository/*/.git/
+payloads/git-repository/*/

@@ -13,8 +13,10 @@ import time
 import yaml
 import subprocess
 import tempfile
+import tarfile
 import shutil
 import platform
+import atexit
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,6 +47,12 @@ class SwhidHarness:
         self.discovery = ImplementationDiscovery()
         self.implementations = {}
         
+        # Track temporary directories created from tarballs
+        self._temp_dirs = []
+        
+        # Register cleanup function
+        atexit.register(self._cleanup_temp_dirs)
+        
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file."""
         with open(self.config_path, 'r') as f:
@@ -68,6 +76,17 @@ class SwhidHarness:
         
         return filtered
     
+    def _cleanup_temp_dirs(self):
+        """Clean up temporary directories created from tarballs."""
+        for temp_dir in self._temp_dirs:
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                    logger.debug(f"Cleaned up temporary directory: {temp_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
+        self._temp_dirs.clear()
+    
     def _obj_type_to_swhid_code(self, obj_type: str) -> str:
         """Map object type to SWHID type code."""
         mapping = {
@@ -79,6 +98,43 @@ class SwhidHarness:
         }
         return mapping.get(obj_type, obj_type)
     
+    def _extract_tarball_if_needed(self, payload_path: str) -> str:
+        """Extract tarball to temporary directory if payload is a .tar.gz file.
+        
+        Returns:
+            Path to the extracted directory (or original path if not a tarball)
+        """
+        if not payload_path.endswith('.tar.gz'):
+            return payload_path
+        
+        # Resolve absolute path
+        if not os.path.isabs(payload_path):
+            config_dir = os.path.dirname(os.path.abspath(self.config_path))
+            payload_path = os.path.join(config_dir, payload_path)
+        
+        if not os.path.exists(payload_path):
+            raise FileNotFoundError(f"Tarball not found: {payload_path}")
+        
+        # Create temporary directory
+        temp_dir = tempfile.mkdtemp(prefix="swhid_test_")
+        self._temp_dirs.append(temp_dir)
+        
+        # Extract tarball
+        logger.debug(f"Extracting {payload_path} to {temp_dir}")
+        with tarfile.open(payload_path, "r:gz") as tar:
+            tar.extractall(temp_dir)
+        
+        # Find the extracted directory (should be the first directory in the tarball)
+        extracted_items = os.listdir(temp_dir)
+        if len(extracted_items) == 1 and os.path.isdir(os.path.join(temp_dir, extracted_items[0])):
+            extracted_path = os.path.join(temp_dir, extracted_items[0])
+        else:
+            # Multiple items or unexpected structure - use temp_dir itself
+            extracted_path = temp_dir
+        
+        logger.debug(f"Extracted to: {extracted_path}")
+        return extracted_path
+    
     def _run_single_test(self, implementation: SwhidImplementation, payload_path: str, 
                          payload_name: str, category: Optional[str] = None, 
                          commit: Optional[str] = None, tag: Optional[str] = None) -> SwhidTestResult:
@@ -86,6 +142,9 @@ class SwhidHarness:
         start_time = time.time()
         
         try:
+            # Extract tarball if needed
+            actual_payload_path = self._extract_tarball_if_needed(payload_path)
+            
             # Determine object type from category if available, otherwise auto-detect
             if category:
                 # Map category to object type
@@ -97,17 +156,17 @@ class SwhidHarness:
                     obj_type = "snapshot"  # Git category means snapshot
                 elif category == "git-repository":
                     # git-repository category: auto-detect based on payload (can be snapshot, revision, or release)
-                    obj_type = implementation.detect_object_type(payload_path)
+                    obj_type = implementation.detect_object_type(actual_payload_path)
                 elif category == "revision":
                     obj_type = "revision"  # Revision category means revision (Git commit)
                 elif category == "release":
                     obj_type = "release"  # Release category means release (Git tag)
                 else:
                     # Fallback to auto-detection for unknown categories
-                    obj_type = implementation.detect_object_type(payload_path)
+                    obj_type = implementation.detect_object_type(actual_payload_path)
             else:
                 # Auto-detect object type if category not provided
-                obj_type = implementation.detect_object_type(payload_path)
+                obj_type = implementation.detect_object_type(actual_payload_path)
             
             # Check if implementation supports this object type
             capabilities = implementation.get_capabilities()
@@ -127,7 +186,7 @@ class SwhidHarness:
                 )
             
             # For revision/release, pass commit/tag information to implementations
-            swhid = implementation.compute_swhid(payload_path, obj_type, commit=commit, tag=tag)
+            swhid = implementation.compute_swhid(actual_payload_path, obj_type, commit=commit, tag=tag)
             duration = time.time() - start_time
             
             return SwhidTestResult(
@@ -173,22 +232,19 @@ class SwhidHarness:
         """Discover and test all branches and/or annotated tags in a Git repository."""
         all_results = []
         
-        if not os.path.exists(repo_path):
-            logger.warning(f"Repository not found: {repo_path}")
-            return all_results
+        # Extract tarball if needed
+        actual_repo_path = self._extract_tarball_if_needed(repo_path)
         
-        # Resolve relative paths
-        if not os.path.isabs(repo_path):
-            # Use config file directory as base
-            config_dir = os.path.dirname(os.path.abspath(self.config_path))
-            repo_path = os.path.join(config_dir, repo_path)
+        if not os.path.exists(actual_repo_path):
+            logger.warning(f"Repository not found: {actual_repo_path}")
+            return all_results
         
         # Discover branches
         if discover_branches:
             try:
                 result = subprocess.run(
                     ["git", "branch", "-a"],
-                    cwd=repo_path,
+                    cwd=actual_repo_path,
                     capture_output=True,
                     text=True,
                     check=True,
@@ -215,7 +271,7 @@ class SwhidHarness:
                     results = {}
                     with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
                         future_to_impl = {
-                            executor.submit(self._run_single_test, impl, repo_path, test_name, 
+                            executor.submit(self._run_single_test, impl, actual_repo_path, test_name, 
                                           category="revision", commit=branch): impl
                             for impl in self.implementations.values()
                         }
@@ -228,7 +284,7 @@ class SwhidHarness:
                                 logger.error(f"Error running test for {impl.get_info().name}: {e}")
                     
                     # Compare results (no expected SWHID for discovered tests)
-                    comparison = self._compare_results(test_name, repo_path, results, expected_swhid=None)
+                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=None)
                     all_results.append(comparison)
                     
                     # Log results similar to regular tests
@@ -286,7 +342,7 @@ class SwhidHarness:
                                     logger.error(f"      {impl_name}: {error}")
                     
             except subprocess.CalledProcessError as e:
-                logger.warning(f"Failed to discover branches in {repo_path}: {e}")
+                logger.warning(f"Failed to discover branches in {actual_repo_path}: {e}")
             except Exception as e:
                 logger.warning(f"Error discovering branches: {e}")
         
@@ -295,7 +351,7 @@ class SwhidHarness:
             try:
                 result = subprocess.run(
                     ["git", "tag", "-l"],
-                    cwd=repo_path,
+                    cwd=actual_repo_path,
                     capture_output=True,
                     text=True,
                     check=True,
@@ -309,7 +365,7 @@ class SwhidHarness:
                     try:
                         tag_type_result = subprocess.run(
                             ["git", "cat-file", "-t", tag],
-                            cwd=repo_path,
+                            cwd=actual_repo_path,
                             capture_output=True,
                             text=True,
                             check=True,
@@ -332,7 +388,7 @@ class SwhidHarness:
                     results = {}
                     with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
                         future_to_impl = {
-                            executor.submit(self._run_single_test, impl, repo_path, test_name, 
+                            executor.submit(self._run_single_test, impl, actual_repo_path, test_name, 
                                           category="release", tag=tag): impl
                             for impl in self.implementations.values()
                         }
@@ -345,7 +401,7 @@ class SwhidHarness:
                                 logger.error(f"Error running test for {impl.get_info().name}: {e}")
                     
                     # Compare results (no expected SWHID for discovered tests)
-                    comparison = self._compare_results(test_name, repo_path, results, expected_swhid=None)
+                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=None)
                     all_results.append(comparison)
                     
                     # Log results similar to regular tests
@@ -403,7 +459,7 @@ class SwhidHarness:
                                     logger.error(f"      {impl_name}: {error}")
                     
             except subprocess.CalledProcessError as e:
-                logger.warning(f"Failed to discover tags in {repo_path}: {e}")
+                logger.warning(f"Failed to discover tags in {actual_repo_path}: {e}")
             except Exception as e:
                 logger.warning(f"Error discovering tags: {e}")
         

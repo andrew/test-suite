@@ -187,42 +187,42 @@ payloads:
   git-repository:
   - description: Simple Git repo with multiple commits (tests snapshot, revision)
     name: simple_revisions
-    path: payloads/git-repository/simple_revisions/
+    path: payloads/git-repository/simple_revisions.tar.gz
     expected_swhid: swh:1:snp:2f1450c1be7a6945b69d2c3724ac30a3be025e92
   - description: Git repo with merge commits - tests snapshot and revision from merge
       commit
     name: merge_commits
-    path: payloads/git-repository/merge_commits/
+    path: payloads/git-repository/merge_commits.tar.gz
     expected_swhid: swh:1:snp:5c9c3c9be880d0ac89707304017006716d6749a6
   - description: Git repo with both annotated and lightweight tags - tests snapshot,
       release
     name: tag_types
-    path: payloads/git-repository/tag_types/
+    path: payloads/git-repository/tag_types.tar.gz
     expected_swhid: swh:1:snp:98a720761e59ff1704a84b38e0f3f683a6c2d5d9
   - description: Git repo with multiple branches (alpha, beta, gamma, zeta, main)
       - tests snapshot branch ordering
     name: branch_ordering
-    path: payloads/git-repository/branch_ordering/
+    path: payloads/git-repository/branch_ordering.tar.gz
     expected_swhid: swh:1:snp:e44a647204ef944dd0fd28302a0d65124b93cd36
   - description: Git repo with complex merge history - tests snapshot and revision
     name: complex_merges
-    path: payloads/git-repository/complex_merges/
+    path: payloads/git-repository/complex_merges.tar.gz
     expected_swhid: swh:1:snp:604524a5decb4c927258eb4d9f5a121c48218bd4
   - description: Comprehensive Git repo with multiple branches and annotated tags
       - auto-discovers all branches and tags
     name: comprehensive
-    path: payloads/git-repository/comprehensive/
+    path: payloads/git-repository/comprehensive.tar.gz
     discover_branches: true
     discover_tags: true
   - description: Git repo with signed commits (GPG-signed revisions) - tests revision
       SWHID computation for signed commits - auto-discovers all branches
     name: signed_revisions
-    path: payloads/git-repository/signed_revisions/
+    path: payloads/git-repository/signed_revisions.tar.gz
     discover_branches: true
   - description: Git repo with signed tags (GPG-signed releases) - tests release SWHID
       computation for signed tags
     name: signed_releases
-    path: payloads/git-repository/signed_releases/
+    path: payloads/git-repository/signed_releases.tar.gz
     expected_swhid: swh:1:snp:1a358894eaa5f6f9727168d9280e992af1a076b4
   revision:
   - description: Revision from simple Git repo (HEAD commit)
@@ -241,25 +241,25 @@ payloads:
     expected_swhid: swh:1:rev:d8693ad0daffe017605f67d723b66e0c213035cb
   - description: Revision from simple_revisions repo (HEAD)
     name: simple_revisions_head
-    path: payloads/git-repository/simple_revisions/
+    path: payloads/git-repository/simple_revisions.tar.gz
     expected_swhid: swh:1:rev:b7fdd35912b16682ac6e989f75d41870a0f9d904
   - description: Revision from simple_revisions repo (first commit)
     name: simple_revisions_first
-    path: payloads/git-repository/simple_revisions/
+    path: payloads/git-repository/simple_revisions.tar.gz
     commit: b7fdd35
     expected_swhid: swh:1:rev:b7fdd35912b16682ac6e989f75d41870a0f9d904
   - description: Revision from merge_commits repo (merge commit)
     name: merge_commits_head
-    path: payloads/git-repository/merge_commits/
+    path: payloads/git-repository/merge_commits.tar.gz
     commit: b644fc7
     expected_swhid: swh:1:rev:b644fc71fa76537858cb421f5bc6fd2f0f475d88
   - description: Revision from signed_revisions repo (signed commit on main branch)
     name: signed_revision_main
-    path: payloads/git-repository/signed_revisions/
+    path: payloads/git-repository/signed_revisions.tar.gz
     expected_swhid: swh:1:rev:8a1241cc9d81178d7c1c29201354b2cb309601fe
   - description: Revision from signed_revisions repo (signed commit on feature branch)
     name: signed_revision_feature
-    path: payloads/git-repository/signed_revisions/
+    path: payloads/git-repository/signed_revisions.tar.gz
     commit: signed-feature
     expected_swhid: swh:1:rev:8a1241cc9d81178d7c1c29201354b2cb309601fe
   release:
@@ -279,22 +279,22 @@ payloads:
     tag: v2.0
   - description: Release from signed_releases repo (signed tag v1.0.0)
     name: signed_release_v1
-    path: payloads/git-repository/signed_releases/
+    path: payloads/git-repository/signed_releases.tar.gz
     tag: v1.0.0
     expected_swhid: swh:1:rel:d6bc712db2ffad219e410155850770f2a6f80566
   - description: Release from signed_releases repo (signed tag v2.0.0)
     name: signed_release_v2
-    path: payloads/git-repository/signed_releases/
+    path: payloads/git-repository/signed_releases.tar.gz
     tag: v2.0.0
     expected_swhid: swh:1:rel:90b798f42ee8c20dc94b119fc4139b79a03c3b7e
   - description: Release from signed_releases repo (signed tag v2.1.0)
     name: signed_release_v2_1
-    path: payloads/git-repository/signed_releases/
+    path: payloads/git-repository/signed_releases.tar.gz
     tag: v2.1.0
     expected_swhid: swh:1:rel:dc4a4d4c9110311ff03e0a6f218ecfcb3247ac0b
   - description: Release from tag_types repo (annotated tag v1.0)
     name: tag_types_annotated
-    path: payloads/git-repository/tag_types/
+    path: payloads/git-repository/tag_types.tar.gz
     tag: v1.0
     expected_swhid: swh:1:rel:302822701a46791d97f5e372255b7db078a342e2
   negative:
