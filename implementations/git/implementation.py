@@ -48,7 +48,8 @@ class Implementation(SwhidImplementation):
             supports_percent_encoding=True
         )
     
-    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None) -> str:
+    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None,
+                     commit: Optional[str] = None, tag: Optional[str] = None) -> str:
         """Compute SWHID using Git's hashing algorithm via dulwich."""
         if not DULWICH_AVAILABLE:
             raise RuntimeError("dulwich library not available")
@@ -72,9 +73,9 @@ class Implementation(SwhidImplementation):
             elif obj_type == "directory":
                 return self._compute_directory_swhid(payload_path)
             elif obj_type == "revision":
-                return self._compute_revision_swhid(payload_path)
+                return self._compute_revision_swhid(payload_path, commit=commit)
             elif obj_type == "release":
-                return self._compute_release_swhid(payload_path)
+                return self._compute_release_swhid(payload_path, tag=tag)
             else:
                 raise ValueError(f"Unsupported object type: {obj_type}")
         except Exception as e:
@@ -188,14 +189,156 @@ class Implementation(SwhidImplementation):
         
         return tree
     
-    def _compute_revision_swhid(self, repo_path: str) -> str:
+    def _compute_revision_swhid(self, repo_path: str, commit: Optional[str] = None) -> str:
         """Compute revision SWHID using Git commit hash."""
-        # This would require parsing Git repository and finding the HEAD commit
-        # For now, we'll skip this as it's complex and not needed for basic testing
-        raise NotImplementedError("Git revision SWHID computation not implemented")
+        # Open the repository
+        repo = dulwich.repo.Repo(repo_path)
+        
+        # Default to HEAD if no commit specified
+        if commit is None:
+            commit = "HEAD"
+        
+        # Resolve commit reference
+        commit_sha = None
+        
+        if commit == "HEAD":
+            # Try HEAD first
+            try:
+                head_ref = repo.refs[b"HEAD"]
+                # HEAD might be a symbolic ref (bytes starting with "refs/") or direct SHA
+                if isinstance(head_ref, bytes) and head_ref.startswith(b"refs/"):
+                    # Symbolic ref - resolve it
+                    commit_sha = repo.refs[head_ref]
+                else:
+                    # Direct SHA
+                    commit_sha = head_ref
+            except KeyError:
+                # Try to get from refs/heads/main
+                try:
+                    commit_sha = repo.refs[b"refs/heads/main"]
+                except KeyError:
+                    # Get first branch
+                    branches = [ref for ref in repo.refs.keys() if ref.startswith(b"refs/heads/")]
+                    if branches:
+                        commit_sha = repo.refs[branches[0]]
+                    else:
+                        raise ValueError("No commits found in repository")
+        elif len(commit) == 40:
+            # Full SHA - try to get object directly
+            try:
+                commit_sha = bytes.fromhex(commit)
+                # Verify it exists and is a commit
+                commit_obj = repo.get_object(commit_sha)
+                if commit_obj.type_name != "commit":
+                    raise ValueError(f"Object '{commit}' is not a commit")
+            except (KeyError, ValueError):
+                raise ValueError(f"Commit '{commit}' not found")
+        elif len(commit) == 7:
+            # Short SHA - search for matching commit by walking commit graph from all refs
+            # This is more reliable than searching object store
+            from dulwich.walk import Walker
+            
+            # Try all refs and walk their commit history
+            for ref in repo.refs.keys():
+                try:
+                    ref_sha = repo.refs[ref]
+                    # Walk commits from this ref
+                    walker = Walker(repo.object_store, [ref_sha], follow=True)
+                    for entry in walker:
+                        # Convert commit SHA to hex string
+                        if isinstance(entry.commit.id, bytes):
+                            commit_hex = entry.commit.id.decode('ascii')
+                        elif hasattr(entry.commit.id, 'hex'):
+                            commit_hex = entry.commit.id.hex()
+                        else:
+                            commit_hex = str(entry.commit.id)
+                        
+                        if commit_hex.startswith(commit):
+                            commit_sha = entry.commit.id
+                            break
+                    
+                    if commit_sha is not None:
+                        break
+                except:
+                    continue
+            
+            if commit_sha is None:
+                raise ValueError(f"Could not resolve short SHA '{commit}'")
+        else:
+            # Try as ref name (branch name)
+            try:
+                # Try refs/heads/<name>
+                commit_sha = repo.refs[b"refs/heads/" + commit.encode()]
+            except KeyError:
+                try:
+                    # Try as full ref
+                    commit_sha = repo.refs[commit.encode()]
+                except KeyError:
+                    raise ValueError(f"Commit/ref '{commit}' not found")
+        
+        # Verify commit_sha is set
+        if commit_sha is None:
+            raise ValueError(f"Could not resolve commit '{commit}'")
+        
+        # Get commit object to verify it's a commit
+        try:
+            commit_obj = repo.get_object(commit_sha)
+        except KeyError:
+            raise ValueError(f"Commit '{commit}' not found in repository")
+        
+        # Check if it's a commit (dulwich uses bytes for type_name)
+        type_name = commit_obj.type_name
+        if isinstance(type_name, bytes):
+            type_name = type_name.decode('ascii')
+        if type_name != "commit":
+            raise ValueError(f"Object '{commit}' is not a commit (type: {type_name})")
+        
+        # Convert to hex string
+        # dulwich returns SHA1 objects or bytes (which are hex strings as bytes)
+        # Check bytes first, as bytes objects also have a .hex() method
+        if isinstance(commit_sha, bytes):
+            # Bytes are already hex-encoded as ASCII, just decode
+            commit_id = commit_sha.decode('ascii')
+        elif hasattr(commit_sha, 'hex'):
+            commit_id = commit_sha.hex()
+        else:
+            commit_id = str(commit_sha)
+        
+        return f"swh:1:rev:{commit_id}"
     
-    def _compute_release_swhid(self, repo_path: str) -> str:
+    def _compute_release_swhid(self, repo_path: str, tag: Optional[str] = None) -> str:
         """Compute release SWHID using Git tag hash."""
-        # This would require parsing Git repository and finding tags
-        # For now, we'll skip this as it's complex and not needed for basic testing
-        raise NotImplementedError("Git release SWHID computation not implemented")
+        if tag is None:
+            raise ValueError("Tag name is required for release SWHID computation")
+        
+        # Open the repository
+        repo = dulwich.repo.Repo(repo_path)
+        
+        # Resolve tag reference
+        tag_ref = b"refs/tags/" + tag.encode()
+        try:
+            tag_sha = repo.refs[tag_ref]
+        except KeyError:
+            raise ValueError(f"Tag '{tag}' not found")
+        
+        # Get the tag object
+        tag_obj = repo.get_object(tag_sha)
+        
+        # Check if it's an annotated tag (tag object) or lightweight tag (commit)
+        type_name = tag_obj.type_name
+        if isinstance(type_name, bytes):
+            type_name = type_name.decode('ascii')
+        
+        if type_name == "tag":
+            # Annotated tag - use the tag object hash
+            if isinstance(tag_sha, bytes):
+                # Bytes are already hex-encoded as ASCII, just decode
+                tag_id = tag_sha.decode('ascii')
+            elif hasattr(tag_sha, 'hex'):
+                tag_id = tag_sha.hex()
+            else:
+                tag_id = str(tag_sha)
+            return f"swh:1:rel:{tag_id}"
+        else:
+            # Lightweight tag - points to a commit, not a tag object
+            raise ValueError(f"Tag '{tag}' is a lightweight tag, not an annotated tag. Releases require annotated tags.")

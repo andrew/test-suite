@@ -55,7 +55,8 @@ class Implementation(SwhidImplementation):
             supports_percent_encoding=True
         )
     
-    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None) -> str:
+    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None,
+                     commit: Optional[str] = None, tag: Optional[str] = None) -> str:
         """Compute SWHID for a payload using the Rust implementation."""
         # Convert to absolute path
         payload_path = os.path.abspath(payload_path)
@@ -90,13 +91,35 @@ class Implementation(SwhidImplementation):
             # This is for git repositories, payload_path should be the repo
             # Note: requires --features git
             # Uses positional arguments, not --repo flag
+            # Resolve short SHA to full SHA if needed (Rust tool may not support short SHAs)
+            resolved_commit = commit
+            if commit and len(commit) < 40 and commit != "HEAD":
+                # Use git rev-parse to resolve short SHA to full SHA
+                try:
+                    result = subprocess.run(
+                        ["git", "rev-parse", commit],
+                        cwd=payload_path,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        timeout=5
+                    )
+                    resolved_commit = result.stdout.strip()
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    # If git rev-parse fails, use original commit (let Rust tool handle it)
+                    resolved_commit = commit
+            
             cmd = ["cargo", "run", "--release", "--features", "git", "--"]
             cmd.extend(["git", "revision", payload_path])
+            if resolved_commit:
+                cmd.append(resolved_commit)
         elif obj_type == "release":
             # For release: swhid git release <REPO> <TAG>
-            # This requires a tag, which we don't have from the payload
             # Uses positional arguments: <REPO> <TAG>
-            raise NotImplementedError("Release SWHID requires a tag name, which is not available from payload path")
+            if not tag:
+                raise ValueError("Release SWHID requires a tag name")
+            cmd = ["cargo", "run", "--release", "--features", "git", "--"]
+            cmd.extend(["git", "release", payload_path, tag])
         else:
             raise ValueError(f"Unsupported object type: {obj_type}")
         

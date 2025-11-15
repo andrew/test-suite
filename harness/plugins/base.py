@@ -178,10 +178,18 @@ class SwhidImplementation(ABC):
         """Return implementation capabilities."""
         pass
     
-    @abstractmethod
-    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None) -> str:
-        """Compute SWHID for given payload."""
-        pass
+    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None, 
+                     commit: Optional[str] = None, tag: Optional[str] = None) -> str:
+        """Compute SWHID for given payload.
+        
+        Args:
+            payload_path: Path to the payload (file, directory, or Git repository)
+            obj_type: Object type (content, directory, revision, release, snapshot)
+            commit: Optional commit SHA for revision SWHIDs (defaults to HEAD)
+            tag: Optional tag name for release SWHIDs (required for releases)
+        """
+        # Default implementation - subclasses should override
+        raise NotImplementedError("Subclasses must implement compute_swhid")
     
     def benchmark(self, payload_path: str, iterations: int = 100) -> BenchmarkResult:
         """Run performance benchmarks (default implementation)."""
@@ -226,16 +234,23 @@ class SwhidImplementation(ABC):
             raise ValueError(f"Payload does not exist: {payload_path}")
         
         if path.is_file():
-            # Check if it's a Git repository
-            git_dir = path / ".git"
-            if git_dir.exists() and git_dir.is_dir():
-                return "snapshot"
             return "content"
         elif path.is_dir():
             # Check if it's a Git repository
+            # Case 1: Regular Git repo (has .git subdirectory)
             git_dir = path / ".git"
-            if git_dir.exists() and git_dir.is_dir():
+            if git_dir.exists():
+                # .git can be a directory or a file (for worktrees/submodules)
+                if git_dir.is_dir() or git_dir.is_file():
+                    return "snapshot"
+            
+            # Case 2: Bare Git repository (directory itself is the git repo)
+            # Check for common git repository indicators
+            if (path / "HEAD").exists() and \
+               (path / "refs").exists() and \
+               (path / "objects").exists():
                 return "snapshot"
+            
             return "directory"
         else:
             raise ValueError(f"Payload is neither file nor directory: {payload_path}")

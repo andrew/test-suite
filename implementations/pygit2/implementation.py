@@ -47,7 +47,8 @@ class Implementation(SwhidImplementation):
             supports_percent_encoding=True
         )
     
-    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None) -> str:
+    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None,
+                     commit: Optional[str] = None, tag: Optional[str] = None) -> str:
         """Compute SWHID using pygit2 (libgit2)."""
         if not PYGIT2_AVAILABLE:
             raise RuntimeError("pygit2 library not available")
@@ -71,9 +72,9 @@ class Implementation(SwhidImplementation):
             elif obj_type == "directory":
                 return self._compute_directory_swhid(payload_path)
             elif obj_type == "revision":
-                return self._compute_revision_swhid(payload_path)
+                return self._compute_revision_swhid(payload_path, commit=commit)
             elif obj_type == "release":
-                return self._compute_release_swhid(payload_path)
+                return self._compute_release_swhid(payload_path, tag=tag)
             else:
                 raise ValueError(f"Unsupported object type: {obj_type}")
         except Exception as e:
@@ -161,14 +162,107 @@ class Implementation(SwhidImplementation):
         
         return tree_id
     
-    def _compute_revision_swhid(self, repo_path: str) -> str:
+    def _compute_revision_swhid(self, repo_path: str, commit: Optional[str] = None) -> str:
         """Compute revision SWHID using pygit2 commit hash."""
-        # This would require parsing Git repository and finding the HEAD commit
-        # For now, we'll skip this as it's complex and not needed for basic testing
-        raise NotImplementedError("Git revision SWHID computation not implemented")
+        # Open the repository
+        repo = pygit2.Repository(repo_path)
+        
+        # Default to HEAD if no commit specified
+        if commit is None:
+            commit = "HEAD"
+        
+        # Resolve commit reference
+        try:
+            if commit == "HEAD":
+                commit_obj = repo.head.peel(pygit2.Commit)
+            elif len(commit) == 40:
+                # Full SHA
+                commit_obj = repo[commit]
+            elif len(commit) == 7:
+                # Short SHA - try to resolve by searching all refs and commits
+                found = False
+                # First try all refs
+                for ref_name in repo.listall_references():
+                    try:
+                        ref = repo.lookup_reference(ref_name)
+                        if ref.target.hex.startswith(commit):
+                            commit_obj = repo[ref.target]
+                            if isinstance(commit_obj, pygit2.Commit):
+                                found = True
+                                break
+                    except:
+                        continue
+                
+                # If not found in refs, try searching commits directly
+                if not found:
+                    try:
+                        # Walk through all commits to find matching short SHA
+                        for ref_name in repo.listall_references():
+                            try:
+                                ref = repo.lookup_reference(ref_name)
+                                walker = repo.walk(ref.target, pygit2.GIT_SORT_TIME)
+                                for commit_obj in walker:
+                                    if commit_obj.id.hex.startswith(commit):
+                                        found = True
+                                        break
+                                if found:
+                                    break
+                            except:
+                                continue
+                    except:
+                        pass
+                
+                if not found:
+                    raise ValueError(f"Could not resolve short SHA '{commit}'")
+            else:
+                # Try as ref name
+                try:
+                    ref = repo.lookup_reference(f"refs/heads/{commit}")
+                    commit_obj = ref.peel(pygit2.Commit)
+                except KeyError:
+                    raise ValueError(f"Commit/ref '{commit}' not found")
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"Could not resolve commit '{commit}': {e}")
+        
+        if not isinstance(commit_obj, pygit2.Commit):
+            raise ValueError(f"Object '{commit}' is not a commit")
+        
+        commit_id = commit_obj.id.hex
+        return f"swh:1:rev:{commit_id}"
     
-    def _compute_release_swhid(self, repo_path: str) -> str:
+    def _compute_release_swhid(self, repo_path: str, tag: Optional[str] = None) -> str:
         """Compute release SWHID using pygit2 tag hash."""
-        # This would require parsing Git repository and finding tags
-        # For now, we'll skip this as it's complex and not needed for basic testing
-        raise NotImplementedError("Git release SWHID computation not implemented")
+        if tag is None:
+            raise ValueError("Tag name is required for release SWHID computation")
+        
+        # Open the repository
+        repo = pygit2.Repository(repo_path)
+        
+        # Resolve tag reference
+        try:
+            tag_ref = repo.lookup_reference(f"refs/tags/{tag}")
+        except KeyError:
+            raise ValueError(f"Tag '{tag}' not found")
+        
+        # Get the tag object directly (not peeled) to check if it's an annotated tag
+        # For annotated tags, the ref points to a Tag object
+        # For lightweight tags, the ref points directly to a Commit
+        try:
+            # Try to get the tag object directly from the ref target
+            tag_obj = repo[tag_ref.target]
+            if isinstance(tag_obj, pygit2.Tag):
+                # Annotated tag - use the tag object hash
+                tag_id = tag_obj.id.hex
+                return f"swh:1:rel:{tag_id}"
+            else:
+                # Lightweight tag - points to a commit, not a tag object
+                raise ValueError(f"Tag '{tag}' is a lightweight tag, not an annotated tag. Releases require annotated tags.")
+        except (KeyError, TypeError):
+            # If we can't get the object directly, it might be a lightweight tag
+            # Try peeling to see what it points to
+            tag_obj = tag_ref.peel()
+            if isinstance(tag_obj, pygit2.Tag):
+                tag_id = tag_obj.id.hex
+                return f"swh:1:rel:{tag_id}"
+            else:
+                raise ValueError(f"Tag '{tag}' is a lightweight tag, not an annotated tag. Releases require annotated tags.")
