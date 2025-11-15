@@ -13,8 +13,10 @@ import time
 import yaml
 import subprocess
 import tempfile
+import tarfile
 import shutil
 import platform
+import atexit
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,6 +47,12 @@ class SwhidHarness:
         self.discovery = ImplementationDiscovery()
         self.implementations = {}
         
+        # Track temporary directories created from tarballs
+        self._temp_dirs = []
+        
+        # Register cleanup function
+        atexit.register(self._cleanup_temp_dirs)
+        
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file."""
         with open(self.config_path, 'r') as f:
@@ -68,6 +76,17 @@ class SwhidHarness:
         
         return filtered
     
+    def _cleanup_temp_dirs(self):
+        """Clean up temporary directories created from tarballs."""
+        for temp_dir in self._temp_dirs:
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                    logger.debug(f"Cleaned up temporary directory: {temp_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
+        self._temp_dirs.clear()
+    
     def _obj_type_to_swhid_code(self, obj_type: str) -> str:
         """Map object type to SWHID type code."""
         mapping = {
@@ -79,12 +98,53 @@ class SwhidHarness:
         }
         return mapping.get(obj_type, obj_type)
     
+    def _extract_tarball_if_needed(self, payload_path: str) -> str:
+        """Extract tarball to temporary directory if payload is a .tar.gz file.
+        
+        Returns:
+            Path to the extracted directory (or original path if not a tarball)
+        """
+        if not payload_path.endswith('.tar.gz'):
+            return payload_path
+        
+        # Resolve absolute path
+        if not os.path.isabs(payload_path):
+            config_dir = os.path.dirname(os.path.abspath(self.config_path))
+            payload_path = os.path.join(config_dir, payload_path)
+        
+        if not os.path.exists(payload_path):
+            raise FileNotFoundError(f"Tarball not found: {payload_path}")
+        
+        # Create temporary directory
+        temp_dir = tempfile.mkdtemp(prefix="swhid_test_")
+        self._temp_dirs.append(temp_dir)
+        
+        # Extract tarball
+        logger.debug(f"Extracting {payload_path} to {temp_dir}")
+        with tarfile.open(payload_path, "r:gz") as tar:
+            tar.extractall(temp_dir)
+        
+        # Find the extracted directory (should be the first directory in the tarball)
+        extracted_items = os.listdir(temp_dir)
+        if len(extracted_items) == 1 and os.path.isdir(os.path.join(temp_dir, extracted_items[0])):
+            extracted_path = os.path.join(temp_dir, extracted_items[0])
+        else:
+            # Multiple items or unexpected structure - use temp_dir itself
+            extracted_path = temp_dir
+        
+        logger.debug(f"Extracted to: {extracted_path}")
+        return extracted_path
+    
     def _run_single_test(self, implementation: SwhidImplementation, payload_path: str, 
-                         payload_name: str, category: Optional[str] = None) -> SwhidTestResult:
+                         payload_name: str, category: Optional[str] = None, 
+                         commit: Optional[str] = None, tag: Optional[str] = None) -> SwhidTestResult:
         """Run a single test for one implementation."""
         start_time = time.time()
         
         try:
+            # Extract tarball if needed
+            actual_payload_path = self._extract_tarball_if_needed(payload_path)
+            
             # Determine object type from category if available, otherwise auto-detect
             if category:
                 # Map category to object type
@@ -94,12 +154,19 @@ class SwhidHarness:
                     obj_type = "directory"  # Don't auto-detect as snapshot for directory tests
                 elif category == "git":
                     obj_type = "snapshot"  # Git category means snapshot
+                elif category == "git-repository":
+                    # git-repository category: auto-detect based on payload (can be snapshot, revision, or release)
+                    obj_type = implementation.detect_object_type(actual_payload_path)
+                elif category == "revision":
+                    obj_type = "revision"  # Revision category means revision (Git commit)
+                elif category == "release":
+                    obj_type = "release"  # Release category means release (Git tag)
                 else:
                     # Fallback to auto-detection for unknown categories
-                    obj_type = implementation.detect_object_type(payload_path)
+                    obj_type = implementation.detect_object_type(actual_payload_path)
             else:
                 # Auto-detect object type if category not provided
-                obj_type = implementation.detect_object_type(payload_path)
+                obj_type = implementation.detect_object_type(actual_payload_path)
             
             # Check if implementation supports this object type
             capabilities = implementation.get_capabilities()
@@ -118,8 +185,8 @@ class SwhidHarness:
                     success=False
                 )
             
-            # Run the test
-            swhid = implementation.compute_swhid(payload_path, obj_type)
+            # For revision/release, pass commit/tag information to implementations
+            swhid = implementation.compute_swhid(actual_payload_path, obj_type, commit=commit, tag=tag)
             duration = time.time() - start_time
             
             return SwhidTestResult(
@@ -160,6 +227,244 @@ class SwhidHarness:
                 success=False
             )
     
+    def _discover_git_tests(self, repo_path: str, base_name: str, 
+                            discover_branches: bool, discover_tags: bool) -> List[ComparisonResult]:
+        """Discover and test all branches and/or annotated tags in a Git repository."""
+        all_results = []
+        
+        # Extract tarball if needed
+        actual_repo_path = self._extract_tarball_if_needed(repo_path)
+        
+        if not os.path.exists(actual_repo_path):
+            logger.warning(f"Repository not found: {actual_repo_path}")
+            return all_results
+        
+        # Discover branches
+        if discover_branches:
+            try:
+                result = subprocess.run(
+                    ["git", "branch", "-a"],
+                    cwd=actual_repo_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=10
+                )
+                branches = []
+                for line in result.stdout.strip().split('\n'):
+                    branch = line.strip().lstrip('*').strip()
+                    # Remove remote prefix and filter out HEAD
+                    if branch.startswith('remotes/'):
+                        branch = branch.replace('remotes/origin/', '').replace('remotes/', '')
+                    if branch and branch != 'HEAD' and not branch.startswith('remotes/'):
+                        branches.append(branch)
+                
+                # Remove duplicates and sort
+                branches = sorted(set(branches))
+                logger.info(f"Discovered {len(branches)} branches in {base_name}: {', '.join(branches)}")
+                
+                # Test each branch as a revision
+                for branch in branches:
+                    test_name = f"{base_name}_branch_{branch.replace('/', '_')}"
+                    logger.info(f"Testing branch '{branch}' as revision: {test_name}")
+                    
+                    results = {}
+                    with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
+                        future_to_impl = {
+                            executor.submit(self._run_single_test, impl, actual_repo_path, test_name, 
+                                          category="revision", commit=branch): impl
+                            for impl in self.implementations.values()
+                        }
+                        for future in as_completed(future_to_impl):
+                            impl = future_to_impl[future]
+                            try:
+                                result = future.result()
+                                results[impl.get_info().name] = result
+                            except Exception as e:
+                                logger.error(f"Error running test for {impl.get_info().name}: {e}")
+                    
+                    # Compare results (no expected SWHID for discovered tests)
+                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=None)
+                    all_results.append(comparison)
+                    
+                    # Log results similar to regular tests
+                    skipped_impls = [impl_name for impl_name, result in results.items() 
+                                       if not result.success and any(phrase in str(result.error).lower() 
+                                           for phrase in ["not supported", "doesn't support", "does not support", "unsupported"])]
+                    
+                    if comparison.all_match:
+                        # Get the SWHID from any successful result
+                        swhid = next((r.swhid for r in results.values() if r.success), None)
+                        if swhid:
+                            logger.info(f"✓ {test_name}: All implementations match - {swhid}")
+                        else:
+                            logger.info(f"✓ {test_name}: All implementations match")
+                    else:
+                        # Check if all implementations skipped
+                        if skipped_impls and len(skipped_impls) == len(results):
+                            logger.info(f"○ {test_name}: All implementations skipped (unsupported type)")
+                        else:
+                            logger.error(f"✗ {test_name}: Implementations differ")
+                            
+                            # Show skipped implementations
+                            if skipped_impls:
+                                logger.info(f"  Skipped by: {', '.join(skipped_impls)}")
+                            
+                            # Group results by SWHID to show which implementations match
+                            swhid_groups = {}
+                            failed_implementations = []
+                            
+                            for impl_name, result in results.items():
+                                if result.success:
+                                    swhid = result.swhid
+                                    if swhid not in swhid_groups:
+                                        swhid_groups[swhid] = []
+                                    swhid_groups[swhid].append(impl_name)
+                                elif impl_name not in skipped_impls:
+                                    failed_implementations.append((impl_name, result.error))
+                            
+                            # Show SWHID groups
+                            if len(swhid_groups) > 1:
+                                logger.error(f"  Found {len(swhid_groups)} different SWHID groups:")
+                                for i, (swhid, impls) in enumerate(swhid_groups.items(), 1):
+                                    logger.error(f"    Group {i}: {swhid}")
+                                    logger.error(f"      Implementations: {', '.join(impls)}")
+                            elif len(swhid_groups) == 1:
+                                swhid = list(swhid_groups.keys())[0]
+                                impls = list(swhid_groups.values())[0]
+                                logger.error(f"    Group 1: {swhid}")
+                                logger.error(f"      Implementations: {', '.join(impls)}")
+                            
+                            # Show failed implementations
+                            if failed_implementations:
+                                logger.error(f"    Failed implementations:")
+                                for impl_name, error in failed_implementations:
+                                    logger.error(f"      {impl_name}: {error}")
+                    
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"Failed to discover branches in {actual_repo_path}: {e}")
+            except Exception as e:
+                logger.warning(f"Error discovering branches: {e}")
+        
+        # Discover annotated tags
+        if discover_tags:
+            try:
+                result = subprocess.run(
+                    ["git", "tag", "-l"],
+                    cwd=actual_repo_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=10
+                )
+                all_tags = [tag.strip() for tag in result.stdout.strip().split('\n') if tag.strip()]
+                
+                # Filter to only annotated tags
+                annotated_tags = []
+                for tag in all_tags:
+                    try:
+                        tag_type_result = subprocess.run(
+                            ["git", "cat-file", "-t", tag],
+                            cwd=actual_repo_path,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=5
+                        )
+                        if tag_type_result.stdout.strip() == "tag":
+                            annotated_tags.append(tag)
+                    except subprocess.CalledProcessError:
+                        # Skip if we can't determine type
+                        continue
+                
+                annotated_tags = sorted(annotated_tags)
+                logger.info(f"Discovered {len(annotated_tags)} annotated tags in {base_name}: {', '.join(annotated_tags)}")
+                
+                # Test each annotated tag as a release
+                for tag in annotated_tags:
+                    test_name = f"{base_name}_tag_{tag.replace('/', '_')}"
+                    logger.info(f"Testing annotated tag '{tag}' as release: {test_name}")
+                    
+                    results = {}
+                    with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
+                        future_to_impl = {
+                            executor.submit(self._run_single_test, impl, actual_repo_path, test_name, 
+                                          category="release", tag=tag): impl
+                            for impl in self.implementations.values()
+                        }
+                        for future in as_completed(future_to_impl):
+                            impl = future_to_impl[future]
+                            try:
+                                result = future.result()
+                                results[impl.get_info().name] = result
+                            except Exception as e:
+                                logger.error(f"Error running test for {impl.get_info().name}: {e}")
+                    
+                    # Compare results (no expected SWHID for discovered tests)
+                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=None)
+                    all_results.append(comparison)
+                    
+                    # Log results similar to regular tests
+                    skipped_impls = [impl_name for impl_name, result in results.items() 
+                                   if not result.success and any(phrase in str(result.error).lower() 
+                                       for phrase in ["not supported", "doesn't support", "does not support", "unsupported"])]
+                    
+                    if comparison.all_match:
+                        # Get the SWHID from any successful result
+                        swhid = next((r.swhid for r in results.values() if r.success), None)
+                        if swhid:
+                            logger.info(f"✓ {test_name}: All implementations match - {swhid}")
+                        else:
+                            logger.info(f"✓ {test_name}: All implementations match")
+                    else:
+                        # Check if all implementations skipped
+                        if skipped_impls and len(skipped_impls) == len(results):
+                            logger.info(f"○ {test_name}: All implementations skipped (unsupported type)")
+                        else:
+                            logger.error(f"✗ {test_name}: Implementations differ")
+                            
+                            # Show skipped implementations
+                            if skipped_impls:
+                                logger.info(f"  Skipped by: {', '.join(skipped_impls)}")
+                            
+                            # Group results by SWHID to show which implementations match
+                            swhid_groups = {}
+                            failed_implementations = []
+                            
+                            for impl_name, result in results.items():
+                                if result.success:
+                                    swhid = result.swhid
+                                    if swhid not in swhid_groups:
+                                        swhid_groups[swhid] = []
+                                    swhid_groups[swhid].append(impl_name)
+                                elif impl_name not in skipped_impls:
+                                    failed_implementations.append((impl_name, result.error))
+                            
+                            # Show SWHID groups
+                            if len(swhid_groups) > 1:
+                                logger.error(f"  Found {len(swhid_groups)} different SWHID groups:")
+                                for i, (swhid, impls) in enumerate(swhid_groups.items(), 1):
+                                    logger.error(f"    Group {i}: {swhid}")
+                                    logger.error(f"      Implementations: {', '.join(impls)}")
+                            elif len(swhid_groups) == 1:
+                                swhid = list(swhid_groups.keys())[0]
+                                impls = list(swhid_groups.values())[0]
+                                logger.error(f"    Group 1: {swhid}")
+                                logger.error(f"      Implementations: {', '.join(impls)}")
+                            
+                            # Show failed implementations
+                            if failed_implementations:
+                                logger.error(f"    Failed implementations:")
+                                for impl_name, error in failed_implementations:
+                                    logger.error(f"      {impl_name}: {error}")
+                    
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"Failed to discover tags in {actual_repo_path}: {e}")
+            except Exception as e:
+                logger.warning(f"Error discovering tags: {e}")
+        
+        return all_results
+    
     def _compare_results(self, payload_name: str, payload_path: str,
                         results: Dict[str, SwhidTestResult], 
                         expected_swhid: Optional[str] = None) -> ComparisonResult:
@@ -195,7 +500,8 @@ class SwhidHarness:
         )
     
     def run_tests(self, implementations: Optional[List[str]] = None,
-                  categories: Optional[List[str]] = None) -> List[ComparisonResult]:
+                  categories: Optional[List[str]] = None,
+                  payloads: Optional[List[str]] = None) -> List[ComparisonResult]:
         """Run tests for specified implementations and categories."""
         # Load implementations
         self.implementations = self._load_implementations(implementations)
@@ -217,9 +523,16 @@ class SwhidHarness:
             logger.info(f"Testing category: {category}")
             
             # Sort payloads deterministically by name
-            payloads = sorted(self.config["payloads"][category], key=lambda p: p.get("name", p.get("path", "")))
+            category_payloads = sorted(self.config["payloads"][category], key=lambda p: p.get("name", p.get("path", "")))
             
-            for payload in payloads:
+            # Filter by payload names if specified
+            if payloads:
+                category_payloads = [p for p in category_payloads if p.get("name") in payloads]
+                if not category_payloads:
+                    logger.info(f"No matching payloads found in category '{category}' for filter: {payloads}")
+                    continue
+            
+            for payload in category_payloads:
                 payload_path = payload["path"]
                 payload_name = payload["name"]
                 expected_swhid = payload.get("expected_swhid")
@@ -266,11 +579,26 @@ class SwhidHarness:
                 
                 logger.info(f"Testing payload: {payload_name}")
                 
+                # Check if we should discover branches/tags
+                discover_branches = payload.get("discover_branches", False)
+                discover_tags = payload.get("discover_tags", False)
+                
+                if discover_branches or discover_tags:
+                    # Generate test cases for discovered branches/tags
+                    discovered_tests = self._discover_git_tests(payload_path, payload_name, 
+                                                                 discover_branches, discover_tags)
+                    all_results.extend(discovered_tests)
+                    continue
+                
+                # Get commit/tag metadata for revision/release tests
+                commit = payload.get("commit")
+                tag = payload.get("tag")
+                
                 # Run tests for all implementations
                 results = {}
                 with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
                     future_to_impl = {
-                        executor.submit(self._run_single_test, impl, payload_path, payload_name, category): impl
+                        executor.submit(self._run_single_test, impl, payload_path, payload_name, category, commit=commit, tag=tag): impl
                         for impl in self.implementations.values()
                     }
                     
@@ -402,9 +730,16 @@ class SwhidHarness:
                         obj_type = "content"
                     elif category == "directory" or category.startswith("directory/"):
                         obj_type = "directory"
+                    elif category == "revision":
+                        obj_type = "revision"
+                    elif category == "release":
+                        obj_type = "release"
                     else:
                         # Fallback to auto-detection for unknown categories
                         obj_type = impl.detect_object_type(payload_path)
+                    
+                    # For revision/release, note that most implementations don't support these yet
+                    # They will be skipped if not supported
                     
                     swhid = impl.compute_swhid(payload_path, obj_type)
                     
@@ -677,8 +1012,8 @@ class SwhidHarness:
                         impl_skipped_tests[result.implementation].append(test_case.id)
                     elif result.status == "FAIL":
                         impl_stats[result.implementation]["failed"] += 1
-                        if has_expected:
-                            impl_failed_tests[result.implementation].append(test_case.id)
+                        # Always add to failed tests list, regardless of whether expected exists
+                        impl_failed_tests[result.implementation].append(test_case.id)
                         all_agree_on_this_test = False
                     elif result.status == "PASS":
                         # Check if it matches expected (if available)
@@ -883,6 +1218,7 @@ def main():
     parser = argparse.ArgumentParser(description="SWHID Testing Harness")
     parser.add_argument("--impl", nargs="*", help="Specific implementations to test (comma-separated or space-separated)")
     parser.add_argument("--category", nargs="*", help="Specific categories to test (comma-separated or space-separated)")
+    parser.add_argument("--payload", nargs="*", help="Specific payload names to test (comma-separated or space-separated)")
     parser.add_argument("--config", default="config.yaml", help="Configuration file")
     parser.add_argument("--generate-expected", action="store_true", 
                        help="Generate expected results using reference implementation")
@@ -962,7 +1298,16 @@ def main():
             else:
                 category_list = args.category
         
-        results = harness.run_tests(impl_list, category_list)
+        payload_list = None
+        if args.payload:
+            # args.payload is a list (from nargs="*")
+            # If it's a single element with commas, split it; otherwise use as-is
+            if len(args.payload) == 1 and ',' in args.payload[0]:
+                payload_list = [p.strip() for p in args.payload[0].split(',')]
+            else:
+                payload_list = args.payload
+        
+        results = harness.run_tests(impl_list, category_list, payload_list)
         
         # Check for failures if fail-fast
         if args.fail_fast:

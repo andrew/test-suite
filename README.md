@@ -26,7 +26,11 @@ swhid-harness --category content,directory,git
 ### Validate Results
 
 ```bash
+# Validate results
 python3 -m harness.models results.json
+
+# Generate HTML table with color-coded results
+python3 scripts/view_results.py results.json
 ```
 
 ## Project Structure
@@ -46,6 +50,17 @@ swhid-rs-tools/
 ## Adding Implementations
 
 Implementations are auto-discovered from `implementations/`. See [Developer Guide](DEVELOPER_GUIDE.md) for details.
+
+### Multiple Git-Based Implementations
+
+The harness includes three Git-based implementations (`git-cmd`, `git` (dulwich), and `pygit2`) that all compute Git hashes. While they produce identical results, each serves a purpose:
+
+- **Cross-validation**: Agreement across different libraries increases confidence in correctness
+- **Availability**: Different environments may have different tools available (git CLI, dulwich, or libgit2)
+- **Bug detection**: Different libraries may expose edge cases or implementation bugs
+- **Performance comparison**: Different backends have different performance characteristics
+
+These implementations are wrappers around Git's hashing algorithm and should always agree. Disagreements indicate bugs in either the harness or the underlying libraries.
 
 ## Documentation
 

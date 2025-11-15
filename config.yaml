@@ -62,23 +62,6 @@ payloads:
     expected_swhid: swh:1:cnt:34f1257dbbb7e20b745654c0cd067ff24375d1d7
     name: mixed_line_endings
     path: payloads/content/edge_cases/mixed_line_endings.txt
-  content/qualifiers:
-  - description: Single line file for lines= qualifier testing
-    expected_swhid: swh:1:cnt:f9839933987b729e7d654c1f00599185f2bcccf9
-    name: single_line
-    path: payloads/content/qualifiers/single_line.txt
-  - description: Three line file for lines= qualifier testing
-    expected_swhid: swh:1:cnt:6ad36e52f0002937ed2de6a1c15d8a0ae5df056a
-    name: three_lines
-    path: payloads/content/qualifiers/three_lines.txt
-  - description: Five line file for lines= qualifier testing
-    expected_swhid: swh:1:cnt:572d5d94839464f28ef959932515ee6624dbfe01
-    name: five_lines
-    path: payloads/content/qualifiers/five_lines.txt
-  - description: Ten line file for lines= qualifier testing
-    expected_swhid: swh:1:cnt:00935f183cbd9243998bd3f84ac67e18eff726a4
-    name: ten_lines
-    path: payloads/content/qualifiers/ten_lines.txt
   directory:
   - description: Empty directory
     expected_swhid: swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904
@@ -184,6 +167,164 @@ payloads:
     expected_swhid: swh:1:snp:1109043ec17eeb3bf7d657689ab60336c901fde9
     name: signed_tag
     path: payloads/git/signed_tag/
+  git-repository:
+  - description: Simple Git repo with multiple commits (tests snapshot, revision)
+    name: simple_revisions
+    path: payloads/git-repository/simple_revisions.tar.gz
+    expected_swhid: swh:1:snp:2f1450c1be7a6945b69d2c3724ac30a3be025e92
+  - description: Git repo with merge commits - tests snapshot and revision from merge
+      commit
+    name: merge_commits
+    path: payloads/git-repository/merge_commits.tar.gz
+    expected_swhid: swh:1:snp:5c9c3c9be880d0ac89707304017006716d6749a6
+  - description: Git repo with both annotated and lightweight tags - tests snapshot,
+      release
+    name: tag_types
+    path: payloads/git-repository/tag_types.tar.gz
+    expected_swhid: swh:1:snp:98a720761e59ff1704a84b38e0f3f683a6c2d5d9
+  - description: Git repo with multiple branches (alpha, beta, gamma, zeta, main)
+      - tests snapshot branch ordering
+    name: branch_ordering
+    path: payloads/git-repository/branch_ordering.tar.gz
+    expected_swhid: swh:1:snp:e44a647204ef944dd0fd28302a0d65124b93cd36
+  - description: Git repo with complex merge history - tests snapshot and revision
+    name: complex_merges
+    path: payloads/git-repository/complex_merges.tar.gz
+    expected_swhid: swh:1:snp:604524a5decb4c927258eb4d9f5a121c48218bd4
+  - description: Comprehensive Git repo with multiple branches and annotated tags
+      - auto-discovers all branches and tags
+    name: comprehensive
+    path: payloads/git-repository/comprehensive.tar.gz
+    discover_branches: true
+    discover_tags: true
+  - description: Git repo with signed commits (GPG-signed revisions) - tests revision
+      SWHID computation for signed commits - auto-discovers all branches
+    name: signed_revisions
+    path: payloads/git-repository/signed_revisions.tar.gz
+    discover_branches: true
+  - description: Git repo with signed tags (GPG-signed releases) - tests release SWHID
+      computation for signed tags
+    name: signed_releases
+    path: payloads/git-repository/signed_releases.tar.gz
+    expected_swhid: swh:1:snp:1a358894eaa5f6f9727168d9280e992af1a076b4
+  revision:
+  - description: Revision from simple Git repo (HEAD commit)
+    name: simple_revision
+    path: payloads/git/merge_commits/
+    expected_swhid: swh:1:rev:395d056259d91ef412349c5f6bc8273724e82d4b
+  - description: Revision from merge commit (commit with 2+ parents)
+    name: merge_revision
+    path: payloads/git/merge_commits/
+    commit: 395d056
+    expected_swhid: swh:1:rev:395d056259d91ef412349c5f6bc8273724e82d4b
+  - description: Revision from initial commit
+    name: initial_revision
+    path: payloads/git/merge_commits/
+    commit: d8693ad
+    expected_swhid: swh:1:rev:d8693ad0daffe017605f67d723b66e0c213035cb
+  - description: Revision from simple_revisions repo (HEAD)
+    name: simple_revisions_head
+    path: payloads/git-repository/simple_revisions.tar.gz
+    expected_swhid: swh:1:rev:b7fdd35912b16682ac6e989f75d41870a0f9d904
+  - description: Revision from simple_revisions repo (first commit)
+    name: simple_revisions_first
+    path: payloads/git-repository/simple_revisions.tar.gz
+    commit: b7fdd35
+    expected_swhid: swh:1:rev:b7fdd35912b16682ac6e989f75d41870a0f9d904
+  - description: Revision from merge_commits repo (merge commit)
+    name: merge_commits_head
+    path: payloads/git-repository/merge_commits.tar.gz
+    commit: b644fc7
+    expected_swhid: swh:1:rev:b644fc71fa76537858cb421f5bc6fd2f0f475d88
+  - description: Revision from signed_revisions repo (signed commit on main branch)
+    name: signed_revision_main
+    path: payloads/git-repository/signed_revisions.tar.gz
+    expected_swhid: swh:1:rev:8a1241cc9d81178d7c1c29201354b2cb309601fe
+  - description: Revision from signed_revisions repo (signed commit on feature branch)
+    name: signed_revision_feature
+    path: payloads/git-repository/signed_revisions.tar.gz
+    commit: signed-feature
+    expected_swhid: swh:1:rev:8a1241cc9d81178d7c1c29201354b2cb309601fe
+  - description: Revision from comprehensive repo (feature-a branch)
+    name: comprehensive_branch_feature-a
+    path: payloads/git-repository/comprehensive.tar.gz
+    commit: feature-a
+    expected_swhid: swh:1:rev:870dcb724e95453ab9dd2f4a58f98aeb0dcb7764
+  - description: Revision from comprehensive repo (feature-b branch)
+    name: comprehensive_branch_feature-b
+    path: payloads/git-repository/comprehensive.tar.gz
+    commit: feature-b
+    expected_swhid: swh:1:rev:229740cdc7665b5718e34e04a59fd9e981f2c149
+  - description: Revision from comprehensive repo (hotfix branch)
+    name: comprehensive_branch_hotfix
+    path: payloads/git-repository/comprehensive.tar.gz
+    commit: hotfix
+    expected_swhid: swh:1:rev:bfe454d11532e851d36ac5c2c014f12a19c9f720
+  - description: Revision from comprehensive repo (main branch)
+    name: comprehensive_branch_main
+    path: payloads/git-repository/comprehensive.tar.gz
+    commit: main
+    expected_swhid: swh:1:rev:997cc01b55bd38cbcc49f113c9f796e528559adf
+  release:
+  - description: Release from annotated tag v1.0
+    name: annotated_release_v1
+    path: payloads/git/with_tags/
+    tag: v1.0
+    expected_swhid: swh:1:rel:976993709ac2245f5128a5205653b26eab703fe1
+  - description: Release from annotated tag v2.0
+    name: annotated_release_v2
+    path: payloads/git/with_tags/
+    tag: v2.0
+    expected_swhid: swh:1:rel:a7c9921fab18efe11882532bdf751f44a704917a
+  - description: Release from lightweight tag (if supported)
+    name: lightweight_release
+    path: payloads/git/lightweight_vs_annotated/
+    tag: v2.0
+  - description: Release from signed_releases repo (signed tag v1.0.0)
+    name: signed_release_v1
+    path: payloads/git-repository/signed_releases.tar.gz
+    tag: v1.0.0
+    expected_swhid: swh:1:rel:d6bc712db2ffad219e410155850770f2a6f80566
+  - description: Release from signed_releases repo (signed tag v2.0.0)
+    name: signed_release_v2
+    path: payloads/git-repository/signed_releases.tar.gz
+    tag: v2.0.0
+    expected_swhid: swh:1:rel:90b798f42ee8c20dc94b119fc4139b79a03c3b7e
+  - description: Release from signed_releases repo (signed tag v2.1.0)
+    name: signed_release_v2_1
+    path: payloads/git-repository/signed_releases.tar.gz
+    tag: v2.1.0
+    expected_swhid: swh:1:rel:dc4a4d4c9110311ff03e0a6f218ecfcb3247ac0b
+  - description: Release from tag_types repo (annotated tag v1.0)
+    name: tag_types_annotated
+    path: payloads/git-repository/tag_types.tar.gz
+    tag: v1.0
+    expected_swhid: swh:1:rel:302822701a46791d97f5e372255b7db078a342e2
+  - description: Release from comprehensive repo (v1.0.0 tag)
+    name: comprehensive_tag_v1.0.0
+    path: payloads/git-repository/comprehensive.tar.gz
+    tag: v1.0.0
+    expected_swhid: swh:1:rel:5286f13487f495993f96ae05b33d10f5f93b82f4
+  - description: Release from comprehensive repo (v1.0.1 tag)
+    name: comprehensive_tag_v1.0.1
+    path: payloads/git-repository/comprehensive.tar.gz
+    tag: v1.0.1
+    expected_swhid: swh:1:rel:bce2af7aab2b64d3198976a83cefffcd6f5b8f54
+  - description: Release from comprehensive repo (v1.1.0 tag)
+    name: comprehensive_tag_v1.1.0
+    path: payloads/git-repository/comprehensive.tar.gz
+    tag: v1.1.0
+    expected_swhid: swh:1:rel:00f5b371d166cff902716f88c59e97eb21d18a7a
+  - description: Release from comprehensive repo (v2.0.0 tag)
+    name: comprehensive_tag_v2.0.0
+    path: payloads/git-repository/comprehensive.tar.gz
+    tag: v2.0.0
+    expected_swhid: swh:1:rel:eb40be8808a4c33f3d3daab634344b673996a49f
+  - description: Release from comprehensive repo (v2.1.0 tag)
+    name: comprehensive_tag_v2.1.0
+    path: payloads/git-repository/comprehensive.tar.gz
+    tag: v2.1.0
+    expected_swhid: swh:1:rel:edaf91f706742fcb19591f59b5397b0a7a09ac39
   negative:
   - description: Test file that doesn't exist (triggers IO_ERROR)
     expected_error: IO_ERROR

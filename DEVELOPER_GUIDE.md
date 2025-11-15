@@ -210,7 +210,31 @@ cat results.json | jq '.aggregates.overall.pass_rate'
 
 # Find failures
 cat results.json | jq '.tests[] | select(.results[] | .status == "FAIL")'
+
+# Generate HTML table with color-coded results
+python scripts/view_results.py results.json
+python scripts/view_results.py results.json --output custom.html
 ```
+
+#### HTML Results Viewer
+
+The `scripts/view_results.py` script generates a color-coded HTML table from test results:
+
+- **Color-coded cells**: Each cell uses a background color to indicate status:
+  - Green: Conformant (PASS with matching expected SWHID)
+  - Red: Non-conformant (wrong SWHID or FAIL with expected) - shows full wrong SWHID
+  - Blue: Executed OK (PASS but no expected to compare)
+  - Yellow: Executed Error (FAIL without expected)
+  - Gray: Skipped (test was skipped)
+- **Compact design**: Cells are color-only (no text labels) except for non-conformant cases which show the full wrong SWHID
+- **Tooltips**: Hover over any cell to see full details (status, SWHID, expected value, errors)
+- **Legend**: Color code explanation at the top of the page
+
+The HTML table makes it easy to:
+- Quickly identify which implementations disagree
+- See the exact wrong SWHIDs for non-conformant cases
+- Compare results across all implementations at a glance
+- Share results with others (HTML is self-contained)
 
 ## Troubleshooting
 

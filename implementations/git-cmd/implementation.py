@@ -51,7 +51,8 @@ class Implementation(SwhidImplementation):
             supports_percent_encoding=True
         )
     
-    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None) -> str:
+    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None,
+                     commit: Optional[str] = None, tag: Optional[str] = None) -> str:
         """Compute SWHID using Git command directly."""
         payload_path = os.path.abspath(payload_path)
         
@@ -72,9 +73,9 @@ class Implementation(SwhidImplementation):
             elif obj_type == "directory":
                 return self._compute_directory_swhid(payload_path)
             elif obj_type == "revision":
-                return self._compute_revision_swhid(payload_path)
+                return self._compute_revision_swhid(payload_path, commit=commit)
             elif obj_type == "release":
-                return self._compute_release_swhid(payload_path)
+                return self._compute_release_swhid(payload_path, tag=tag)
             else:
                 raise ValueError(f"Unsupported object type: {obj_type}")
         except Exception as e:
@@ -143,14 +144,52 @@ class Implementation(SwhidImplementation):
             
             return f"swh:1:dir:{tree_id}"
     
-    def _compute_revision_swhid(self, repo_path: str) -> str:
+    def _compute_revision_swhid(self, repo_path: str, commit: Optional[str] = None) -> str:
         """Compute revision SWHID using Git commit hash."""
-        # This would require parsing Git repository and finding the HEAD commit
-        # For now, we'll skip this as it's complex and not needed for basic testing
-        raise NotImplementedError("Git revision SWHID computation not implemented")
+        # Default to HEAD if no commit specified
+        if commit is None:
+            commit = "HEAD"
+        
+        # Get the commit hash
+        result = subprocess.run(
+            ["git", "rev-parse", commit],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        commit_id = result.stdout.strip()
+        
+        return f"swh:1:rev:{commit_id}"
     
-    def _compute_release_swhid(self, repo_path: str) -> str:
+    def _compute_release_swhid(self, repo_path: str, tag: Optional[str] = None) -> str:
         """Compute release SWHID using Git tag hash."""
-        # This would require parsing Git repository and finding tags
-        # For now, we'll skip this as it's complex and not needed for basic testing
-        raise NotImplementedError("Git release SWHID computation not implemented")
+        if tag is None:
+            raise ValueError("Tag name is required for release SWHID computation")
+        
+        # Get the tag object hash (for annotated tags) or commit hash (for lightweight tags)
+        # First check if it's an annotated tag
+        result = subprocess.run(
+            ["git", "cat-file", "-t", tag],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        tag_type = result.stdout.strip()
+        
+        if tag_type == "tag":
+            # Annotated tag - get the tag object hash
+            result = subprocess.run(
+                ["git", "rev-parse", tag],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            tag_id = result.stdout.strip()
+            return f"swh:1:rel:{tag_id}"
+        else:
+            # Lightweight tag - points to a commit, not a tag object
+            # For releases, we need the tag object, so this is not a valid release
+            raise ValueError(f"Tag '{tag}' is a lightweight tag, not an annotated tag. Releases require annotated tags.")

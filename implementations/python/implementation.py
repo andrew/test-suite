@@ -63,8 +63,14 @@ class Implementation(SwhidImplementation):
             supports_percent_encoding=True
         )
     
-    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None) -> str:
+    def compute_swhid(self, payload_path: str, obj_type: Optional[str] = None,
+                     commit: Optional[str] = None, tag: Optional[str] = None) -> str:
         """Compute SWHID for a payload using the Python implementation."""
+        # Python swh.model.cli doesn't support revision/release types
+        # Skip these as unsupported
+        if obj_type in ("revision", "release"):
+            raise NotImplementedError(f"Python implementation doesn't support {obj_type} object type")
+        
         # Build the command
         cmd = ["python3", "-m", "swh.model.cli"]
         

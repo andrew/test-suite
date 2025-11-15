@@ -13,7 +13,7 @@ dependencies = [
     "pydantic==2.12.0",
     "psutil==6.0.0",
     "dulwich==0.21.7",
-    "pygit2==1.14.1",
+    "pygit2>=1.15.0",
 ]
 
 [project.optional-dependencies]
