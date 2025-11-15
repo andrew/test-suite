@@ -1,9 +1,0 @@
-PyYAML==6.0.2
-dulwich==0.21.7
-pygit2==1.14.1
-pytest==8.3.3
-pytest-cov==5.0.0
-pytest-mock==3.14.0
-pydantic==2.12.0
-psutil==6.0.0
-hypothesis==6.112.0
