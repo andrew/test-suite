@@ -151,22 +151,47 @@ jobs:
           swhid-harness --category content,directory --output-format canonical --dashboard-output results.json || true
           echo "Full test suite completed (some implementations may be skipped)"
       
+      - name: Generate HTML results table
+        if: always()
+        run: |
+          if [ -f results.json ]; then
+            python scripts/view_results.py results.json results.html || echo "Warning: Could not generate HTML table"
+            if [ -f results.html ]; then
+              echo "✅ HTML results table generated: results.html" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ No results.json file found, skipping HTML generation" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+      
       - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: results.json
+          path: |
+            results.json
+            results.html
           retention-days: 30
       
       - name: Generate test summary
+        if: always()
         shell: bash
         run: |
           echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
           if [ -f results.json ]; then
-            python3 -c "import json; fp=open('results.json'); d=json.load(fp); fp.close(); a=d.get('aggregates',{}); b=a.get('by_implementation',{}); p=sum(s.get('passed',0) for s in b.values()); fa=sum(s.get('failed',0) for s in b.values()); sk=sum(s.get('skipped',0) for s in b.values()); t=p+fa+sk; r=(p/t*100) if t>0 else 0; print(f'| Total Tests | {t} |'); print(f'| Passed | {p} |'); print(f'| Failed | {fa} |'); print(f'| Skipped | {sk} |'); print(f'| Success Rate | {r:.1f}% |') if b else print('| Note | Results format not recognized |')" >> $GITHUB_STEP_SUMMARY 2>&1 || echo "| Note | Error parsing results |" >> $GITHUB_STEP_SUMMARY
+            # Generate statistics
+            python3 -c "import json; fp=open('results.json'); d=json.load(fp); fp.close(); a=d.get('aggregates',{}); b=a.get('by_implementation',{}); p=sum(s.get('passed',0) for s in b.values()); fa=sum(s.get('failed',0) for s in b.values()); sk=sum(s.get('skipped',0) for s in b.values()); t=p+fa+sk; r=(p/t*100) if t>0 else 0; print(f'| Metric | Value |'); print(f'|--------|-------|'); print(f'| Total Tests | {t} |'); print(f'| Passed | {p} |'); print(f'| Failed | {fa} |'); print(f'| Skipped | {sk} |'); print(f'| Success Rate | {r:.1f}% |') if b else print('| Note | Results format not recognized |')" >> $GITHUB_STEP_SUMMARY 2>&1 || echo "| Note | Error parsing results |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Add link to HTML results if available
+            if [ -f results.html ]; then
+              echo "### 📊 Detailed Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "📥 Download the [HTML results table](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) from the artifacts." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "The HTML table provides a color-coded view of all test results across all implementations." >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "| Note | No results file (harness tests may have been skipped) |" >> $GITHUB_STEP_SUMMARY
           fi
