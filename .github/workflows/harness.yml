@@ -136,13 +136,13 @@ jobs:
         run: |
           pytest tests/unit/ tests/integration/ -v --tb=short
       
-      - name: Run harness with built-in implementations only
+      - name: Run harness with all available implementations
         if: github.event_name != 'schedule'
         run: |
-          # Test harness with implementations that are guaranteed to be available
-          # (git and pygit2 use Python packages, no external tools needed)
-          swhid-harness --impl git,pygit2 --category content --output-format canonical --dashboard-output results.json || true
-          echo "Harness test with built-in implementations completed"
+          # Test harness with all available implementations
+          # The harness will automatically skip implementations that are not available
+          swhid-harness --category content --output-format canonical --dashboard-output results.json || true
+          echo "Harness test with all available implementations completed"
       
       - name: Run full test suite (if implementations available)
         if: github.event_name == 'schedule'
