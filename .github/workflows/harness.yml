@@ -156,6 +156,7 @@ jobs:
       - name: Check for upstream changes
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         id: check-changes
+        shell: bash
         run: |
           echo "## 🔍 Checking for Upstream Changes" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -303,6 +304,7 @@ jobs:
       
       - name: Run full test suite (all categories and implementations)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        shell: bash
         run: |
           # Scheduled and manual runs test all categories with all available implementations
           # The harness will automatically skip implementations that are not available
