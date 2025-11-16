@@ -7,6 +7,7 @@ on:
     branches: [ main ]
   schedule:
     - cron: "17 2 * * *"  # Nightly deep run at 2:17 AM UTC
+  workflow_dispatch:  # Allow manual triggering from GitHub Actions UI
 
 jobs:
   test:
@@ -137,7 +138,7 @@ jobs:
           pytest tests/unit/ tests/integration/ -v --tb=short
       
       - name: Run harness with built-in implementations only
-        if: github.event_name != 'schedule'
+        if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
         run: |
           # Test harness with implementations that are guaranteed to be available
           # (git and pygit2 use Python packages, no external tools needed)
@@ -145,9 +146,9 @@ jobs:
           echo "Harness test with built-in implementations completed"
       
       - name: Run full test suite (all categories and implementations)
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
-          # Scheduled runs test all categories with all available implementations
+          # Scheduled and manual runs test all categories with all available implementations
           # The harness will automatically skip implementations that are not available
           swhid-harness --output-format canonical --dashboard-output results.json || true
           echo "Full test suite completed (some implementations may be skipped)"
