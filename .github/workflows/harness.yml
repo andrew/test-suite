@@ -31,10 +31,90 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       
-      - name: Install dependencies
+      - name: Install system dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y libgit2-dev pkg-config libssl-dev
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install libgit2 pkg-config openssl
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install -y vcpkg
+            vcpkg install libgit2:x64-windows
+          fi
+        continue-on-error: true
+      
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev] psutil
+      
+      - name: Install Software Heritage Python tools
+        run: |
+          pip install swh.model swh.core || echo "Warning: swh Python tools not available, some implementations may be skipped"
+        continue-on-error: true
+      
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+        continue-on-error: true
+      
+      - name: Setup SSH for private repository access
+        if: env.SWHID_RS_REPO == '' || startsWith(env.SWHID_RS_REPO, 'git@')
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "${{ secrets.SWHID_RS_SSH_KEY }}" ]; then
+            echo "${{ secrets.SWHID_RS_SSH_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+        continue-on-error: true
+      
+      - name: Clone and build swhid-rs
+        id: swhid-rs-setup
+        env:
+          SWHID_RS_REPO: ${{ secrets.SWHID_RS_REPO || 'https://github.com/swhid/swhid-rs.git' }}
+        run: |
+          set +e
+          # Try to clone the swhid-rs repository
+          if [ -n "$SWHID_RS_REPO" ]; then
+            echo "Attempting to clone swhid-rs from $SWHID_RS_REPO"
+            # Use HTTPS with token if available, otherwise try SSH or public HTTPS
+            if [[ "$SWHID_RS_REPO" == https://* ]] && [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+              # Use token for HTTPS access to private repo
+              REPO_URL="${SWHID_RS_REPO/https:\/\//https:\/\/${{ secrets.GITHUB_TOKEN }}@}"
+              git clone "$REPO_URL" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+            else
+              git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+            fi
+            
+            if [ $? -eq 0 ] && [ -d /tmp/swhid-rs ]; then
+              cd /tmp/swhid-rs
+              echo "Building swhid-rs..."
+              cargo build --release 2>&1 | tee /tmp/swhid-rs-build.log
+              if [ $? -eq 0 ]; then
+                echo "swhid-rs built successfully"
+                echo "SWHID_RS_PATH=/tmp/swhid-rs" >> $GITHUB_ENV
+                echo "swhid_rs_available=true" >> $GITHUB_ENV
+                echo "✅ swhid-rs is available" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "swhid-rs build failed (check logs)"
+                echo "swhid_rs_available=false" >> $GITHUB_ENV
+                echo "⚠️ swhid-rs build failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "swhid-rs repository not accessible (private repo or network issue)"
+              echo "swhid_rs_available=false" >> $GITHUB_ENV
+              echo "ℹ️ swhid-rs repository not accessible - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "SWHID_RS_REPO not configured"
+            echo "swhid_rs_available=false" >> $GITHUB_ENV
+            echo "ℹ️ SWHID_RS_REPO not configured - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          set -e
+        continue-on-error: true
       
       - name: Run harness unit tests
         run: |
