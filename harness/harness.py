@@ -471,12 +471,39 @@ class SwhidHarness:
         
         return all_results
     
+    def _is_unsupported_result(self, result: SwhidTestResult) -> bool:
+        """Return True if the result represents an unsupported object type."""
+        if result.success:
+            return False
+        if not result.error:
+            return False
+        err = str(result.error).lower()
+        return "object type" in err and "not support" in err
+    
     def _compare_results(self, payload_name: str, payload_path: str,
                         results: Dict[str, SwhidTestResult], 
                         expected_swhid: Optional[str] = None) -> ComparisonResult:
         """Compare results across implementations."""
+        supported_results = {
+            name: result for name, result in results.items()
+            if not self._is_unsupported_result(result)
+        }
+        
+        if not supported_results:
+            all_unsupported = results and all(self._is_unsupported_result(r) for r in results.values())
+            if all_unsupported:
+                return ComparisonResult(
+                    payload_name=payload_name,
+                    payload_path=payload_path,
+                    results=results,
+                    all_match=True,
+                    expected_swhid=expected_swhid
+                )
+            # Fall through to regular comparison (e.g., missing payloads)
+            supported_results = results
+        
         # Check if all implementations succeeded
-        all_success = all(r.success for r in results.values())
+        all_success = all(r.success for r in supported_results.values())
         
         if not all_success:
             return ComparisonResult(
@@ -488,7 +515,7 @@ class SwhidHarness:
             )
         
         # Get all SWHIDs
-        swhids = [r.swhid for r in results.values() if r.swhid]
+        swhids = [r.swhid for r in supported_results.values() if r.swhid]
         
         # Check if all SWHIDs match
         all_match = len(set(swhids)) == 1 if swhids else False

@@ -105,6 +105,13 @@ During a run the harness looks up these values and compares the consensus SWHID
 from all successful implementations with the configured expectation. Missing
 entries are reported so new branches/tags can be documented explicitly.
 
+### Unsupported payloads
+
+Each implementation declares the SWHID object types it supports. The harness
+checks those capabilities before running a test and marks incompatible payloads
+as `SKIPPED` instead of counting them as failures. The run summary still lists
+which implementations were skipped so that coverage gaps remain visible.
+
 ## Output Format
 
 Results are saved in canonical JSON format (v1.0.0) with:

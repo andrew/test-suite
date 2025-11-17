@@ -254,6 +254,19 @@ class TestSwhidHarness:
         comparison = harness._compare_results("test.txt", "/path/to/test.txt", results, "swh:1:cnt:expected123")
         
         assert comparison.all_match is False
+    
+    def test_compare_results_only_unsupported(self):
+        """Tests with only unsupported implementations should be marked as skipped (match)."""
+        unsupported_error = "Object type 'snapshot' (SWHID code 'snp') not supported by implementation"
+        results = {
+            "impl1": SwhidTestResult("test.txt", "/path", "impl1", None, unsupported_error, 0.0, False),
+            "impl2": SwhidTestResult("test.txt", "/path", "impl2", None, unsupported_error, 0.0, False)
+        }
+        
+        harness = SwhidHarness.__new__(SwhidHarness)
+        comparison = harness._compare_results("test.txt", "/path/to/test.txt", results)
+        
+        assert comparison.all_match is True
 
     @patch("harness.harness.subprocess.run")
     def test_discover_git_tests_uses_expected_values(self, mock_run):
