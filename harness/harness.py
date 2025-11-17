@@ -135,6 +135,30 @@ class SwhidHarness:
         logger.debug(f"Extracted to: {extracted_path}")
         return extracted_path
     
+    def _resolve_commit_reference(self, repo_path: str, commit: Optional[str] = None) -> Optional[str]:
+        """Resolve a commit reference (branch name, tag, short SHA) to a full SHA.
+        
+        Returns the full SHA if successful, or the original commit string if resolution fails.
+        """
+        if not commit or commit == "HEAD" or len(commit) == 40:
+            # HEAD, None, or already a full SHA - return as-is
+            return commit
+        
+        # Try to resolve using git rev-parse (handles branch names, tags, short SHAs)
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", commit],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # Resolution failed - return original (let implementation handle it)
+            return commit
+    
     def _run_single_test(self, implementation: SwhidImplementation, payload_path: str, 
                          payload_name: str, category: Optional[str] = None, 
                          commit: Optional[str] = None, tag: Optional[str] = None) -> SwhidTestResult:
@@ -185,8 +209,15 @@ class SwhidHarness:
                     success=False
                 )
             
+            # Resolve commit reference to full SHA if needed (for branch names, tags, short SHAs)
+            # This ensures all implementations receive a full SHA, not branch names
+            resolved_commit = commit
+            if commit and obj_type == "revision":
+                resolved_commit = self._resolve_commit_reference(actual_payload_path, commit)
+            
             # For revision/release, pass commit/tag information to implementations
-            swhid = implementation.compute_swhid(actual_payload_path, obj_type, commit=commit, tag=tag)
+            # Use resolved commit (full SHA) instead of original commit reference
+            swhid = implementation.compute_swhid(actual_payload_path, obj_type, commit=resolved_commit, tag=tag)
             duration = time.time() - start_time
             
             return SwhidTestResult(

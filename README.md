@@ -89,14 +89,17 @@ Negative tests verify that implementations correctly reject invalid inputs. Add 
 
 ```yaml
 negative:
-  - description: Release from lightweight tag (should be rejected)
-    expected_error: COMPUTE_ERROR
-    name: lightweight_release
-    path: payloads/git/lightweight_vs_annotated/
-    tag: v2.0
+  - description: Test file that doesn't exist (triggers IO_ERROR)
+    expected_error: IO_ERROR
+    name: nonexistent_file
+    path: payloads/negative/nonexistent_file.txt
 ```
 
 A negative test passes when all supporting implementations correctly fail (reject the invalid input). Implementations that don't support the object type are automatically skipped and don't affect the result.
+
+### Commit Reference Resolution
+
+The harness automatically resolves branch names, tag names, and short SHAs to full commit SHAs before passing them to implementations. This ensures all implementations receive consistent input regardless of their internal reference resolution capabilities.
 
 ### Autodiscovery expectations
 
