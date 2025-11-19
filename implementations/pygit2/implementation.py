@@ -185,8 +185,15 @@ class Implementation(SwhidImplementation):
                 for ref_name in repo.listall_references():
                     try:
                         ref = repo.lookup_reference(ref_name)
-                        if ref.target.hex.startswith(commit):
-                            commit_obj = repo[ref.target]
+                        # Get target as hex string (handle both Oid and other types)
+                        if isinstance(ref.target, pygit2.Oid):
+                            target_hex = ref.target.hex
+                            target_oid = ref.target
+                        else:
+                            target_hex = str(ref.target)
+                            target_oid = pygit2.Oid(hex=target_hex)
+                        if target_hex.startswith(commit):
+                            commit_obj = repo[target_oid]
                             if isinstance(commit_obj, pygit2.Commit):
                                 found = True
                                 break
@@ -200,9 +207,14 @@ class Implementation(SwhidImplementation):
                         for ref_name in repo.listall_references():
                             try:
                                 ref = repo.lookup_reference(ref_name)
-                                walker = repo.walk(ref.target, pygit2.GIT_SORT_TIME)
+                                if isinstance(ref.target, pygit2.Oid):
+                                    target_oid = ref.target
+                                else:
+                                    target_oid = pygit2.Oid(hex=str(ref.target))
+                                walker = repo.walk(target_oid, pygit2.GIT_SORT_TIME)
                                 for commit_obj in walker:
-                                    if commit_obj.id.hex.startswith(commit):
+                                    commit_hex = commit_obj.id.hex
+                                    if commit_hex.startswith(commit):
                                         found = True
                                         break
                                 if found:
@@ -215,7 +227,8 @@ class Implementation(SwhidImplementation):
                 if not found:
                     raise ValueError(f"Could not resolve short SHA '{commit}'")
             else:
-                # Try as ref name
+                # Try as ref name (for branch names that weren't resolved to full SHA)
+                # This should rarely be hit now that harness resolves branch names
                 try:
                     ref = repo.lookup_reference(f"refs/heads/{commit}")
                     commit_obj = ref.peel(pygit2.Commit)
@@ -227,6 +240,7 @@ class Implementation(SwhidImplementation):
         if not isinstance(commit_obj, pygit2.Commit):
             raise ValueError(f"Object '{commit}' is not a commit")
         
+        # Get commit ID - commit_obj.id should always be an Oid with .hex
         commit_id = commit_obj.id.hex
         return f"swh:1:rev:{commit_id}"
     
