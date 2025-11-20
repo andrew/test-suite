@@ -759,11 +759,20 @@ class SwhidHarness:
     def _create_minimal_git_repo(self, repo_path: str):
         """Create a small git repository with one commit, one tag, and default HEAD.
         This is used to test snapshot identifiers.
+        
+        Uses fixed timestamps to ensure deterministic commit hashes across runs.
         """
         import subprocess
         import pathlib
+        import os
         path = pathlib.Path(repo_path)
         path.mkdir(parents=True, exist_ok=True)
+
+        # Fixed timestamp for deterministic commits (2020-01-01 00:00:00 UTC)
+        fixed_date = "2020-01-01T00:00:00+0000"
+        env = os.environ.copy()
+        env["GIT_AUTHOR_DATE"] = fixed_date
+        env["GIT_COMMITTER_DATE"] = fixed_date
 
         # Initialize repo
         subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
@@ -773,16 +782,19 @@ class SwhidHarness:
         # Create a file and commit
         (path / "README.md").write_text("# Sample Repo\n")
         subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True)
-        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True, 
+                      capture_output=True, env=env)
         # Create a branch 'feature'
         subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo_path, check=True, capture_output=True)
         (path / "FEATURE.txt").write_text("feature\n")
         subprocess.run(["git", "add", "FEATURE.txt"], cwd=repo_path, check=True)
-        subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True, 
+                      capture_output=True, env=env)
         # Switch back to main
         subprocess.run(["git", "checkout", "-B", "main"], cwd=repo_path, check=True, capture_output=True)
-        # Create an annotated tag
-        subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True, capture_output=True)
+        # Create an annotated tag (with fixed date)
+        subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True, 
+                      capture_output=True, env=env)
     
     def generate_expected_results(self, implementation: str = "python"):
         """Generate expected results using a reference implementation."""
