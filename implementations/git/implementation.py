@@ -224,15 +224,16 @@ class Implementation(SwhidImplementation):
                     else:
                         raise ValueError("No commits found in repository")
         elif len(commit) == 40:
-            # Full SHA - try to get object directly
+            # Full SHA - dulwich expects hex-encoded bytes (40 bytes), not raw bytes (20 bytes)
             try:
-                commit_sha = bytes.fromhex(commit)
+                # Convert hex string to hex-encoded bytes (what dulwich expects)
+                commit_sha = commit.encode('ascii')
                 # Verify it exists and is a commit
                 commit_obj = repo.get_object(commit_sha)
                 if commit_obj.type_name != "commit":
                     raise ValueError(f"Object '{commit}' is not a commit")
-            except (KeyError, ValueError):
-                raise ValueError(f"Commit '{commit}' not found")
+            except (KeyError, ValueError, AssertionError) as e:
+                raise ValueError(f"Commit '{commit}' not found: {e}")
         elif len(commit) == 7:
             # Short SHA - search for matching commit by walking commit graph from all refs
             # This is more reliable than searching object store
