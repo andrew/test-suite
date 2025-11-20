@@ -230,7 +230,8 @@ class Implementation(SwhidImplementation):
                 commit_sha = commit.encode('ascii')
                 # Verify it exists and is a commit
                 commit_obj = repo.get_object(commit_sha)
-                if commit_obj.type_name != "commit":
+                # dulwich returns type_name as bytes, not string
+                if commit_obj.type_name != b"commit":
                     raise ValueError(f"Object '{commit}' is not a commit")
             except (KeyError, ValueError, AssertionError) as e:
                 raise ValueError(f"Commit '{commit}' not found: {e}")

@@ -64,7 +64,7 @@ payloads:
     path: payloads/content/edge_cases/mixed_line_endings.txt
   directory:
   - description: Empty directory
-    expected_swhid: swh:1:dir:4b825dc642cb6eb9a060e54bf8d69288fbee4904
+    expected_swhid: swh:1:dir:d564d0bc3dd917926892c55e3706cc116d5b165e
     name: empty_dir
     path: payloads/directory/empty/
   - description: Directory with files
