@@ -39,16 +39,25 @@
 - Creates synthetic repos even if directory exists but isn't a Git repo
 - Should not affect test results, only when repos are created
 
-### 3. Summary Logic Bug (EXISTING, not from recent changes)
+### 3. Summary Logic Bug (Introduced in commit 4cd0ec1, Nov 16, 2025)
 **Location**: Line 1114
+**Commit**: `4cd0ec1` - "Enhance summary with detailed disagreement information"
 
 **Issue**: 
 - Condition `len(swhids) <= 1` allows 0 SWHIDs, which shouldn't count as "all agree"
 - Should be `len(swhids) == 1` AND `len(non_skipped_results) > 0`
+- The `<= 1` was likely intended to handle edge cases but incorrectly allows empty sets
+
+**Why the bug was introduced**:
+- The commit added the `_print_summary` function with enhanced disagreement reporting
+- The developer used `len(swhids) <= 1` thinking it would handle cases with 0 or 1 unique SWHIDs
+- However, 0 SWHIDs means no implementations succeeded, which should NOT count as "all agree"
+- The condition should require exactly 1 unique SWHID AND at least one non-skipped result
 
 **Impact**:
 - Causes "all implementations agree" count to be incorrect
 - Tests where all implementations agree show as disagreements
+- Summary shows "0/80 all implementations agree" even when implementations actually agree
 
 ## Regression Analysis
 
