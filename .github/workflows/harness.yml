@@ -209,7 +209,7 @@ jobs:
           echo "Harness test with built-in implementations completed"
       
       - name: Download previous run state (if available)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04')
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.os == 'ubuntu-24.04' && matrix.python-version == '3.12'
         uses: actions/download-artifact@v4
         with:
           name: upstream-state
@@ -217,7 +217,7 @@ jobs:
         continue-on-error: true
       
       - name: Check for upstream changes
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04')
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.os == 'ubuntu-24.04' && matrix.python-version == '3.12'
         id: check-changes
         shell: bash
         run: |
