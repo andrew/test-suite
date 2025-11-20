@@ -99,37 +99,50 @@ jobs:
                 REPO_URL="${SWHID_RS_REPO/https:\/\//https:\/\/$SWHID_RS_TOKEN@}"
                 echo "Using token for private repository access"
                 git clone "$REPO_URL" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
               elif [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
                 # Fallback to GITHUB_TOKEN if available
                 REPO_URL="${SWHID_RS_REPO/https:\/\//https:\/\/${{ secrets.GITHUB_TOKEN }}@}"
                 echo "Using GITHUB_TOKEN for repository access"
                 git clone "$REPO_URL" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
               else
                 # Try public access (will fail for private repos)
                 echo "No token available, attempting public access"
                 git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
               fi
             else
               # SSH URL - use SSH key if configured
               git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+              CLONE_EXIT_CODE=${PIPESTATUS[0]}
             fi
-            
-            if [ $? -eq 0 ] && [ -d /tmp/swhid-rs ]; then
+            if [ $CLONE_EXIT_CODE -eq 0 ] && [ -d /tmp/swhid-rs ]; then
               cd /tmp/swhid-rs
               echo "Building swhid-rs..."
               cargo build --release 2>&1 | tee /tmp/swhid-rs-build.log
-              if [ $? -eq 0 ]; then
+              BUILD_EXIT_CODE=${PIPESTATUS[0]}
+              if [ $BUILD_EXIT_CODE -eq 0 ]; then
                 echo "swhid-rs built successfully"
                 echo "SWHID_RS_PATH=/tmp/swhid-rs" >> $GITHUB_ENV
                 echo "swhid_rs_available=true" >> $GITHUB_ENV
                 echo "✅ swhid-rs is available" >> $GITHUB_STEP_SUMMARY
               else
-                echo "swhid-rs build failed (check logs)"
+                echo "swhid-rs build failed (exit code: $BUILD_EXIT_CODE)"
+                echo "Last 20 lines of build log:"
+                tail -20 /tmp/swhid-rs-build.log || true
                 echo "swhid_rs_available=false" >> $GITHUB_ENV
                 echo "⚠️ swhid-rs build failed" >> $GITHUB_STEP_SUMMARY
               fi
             else
-              echo "swhid-rs repository not accessible (private repo or network issue)"
+              echo "swhid-rs repository clone failed (exit code: $CLONE_EXIT_CODE)"
+              if [ -f /tmp/swhid-rs-clone.log ]; then
+                echo "Clone log:"
+                cat /tmp/swhid-rs-clone.log
+              fi
+              if [ ! -d /tmp/swhid-rs ]; then
+                echo "Directory /tmp/swhid-rs does not exist"
+              fi
               echo "swhid_rs_available=false" >> $GITHUB_ENV
               echo "ℹ️ swhid-rs repository not accessible - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
             fi
