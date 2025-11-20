@@ -332,15 +332,15 @@ class SwhidHarness:
                         # Get the SWHID from any successful result
                         swhid = next((r.swhid for r in results.values() if r.success), None)
                         if swhid:
-                            logger.info(f"✓ {test_name}: All implementations match - {swhid}")
+                            logger.info(f"[PASS] {test_name}: All implementations match - {swhid}")
                         else:
-                            logger.info(f"✓ {test_name}: All implementations match")
+                            logger.info(f"[PASS] {test_name}: All implementations match")
                     else:
                         # Check if all implementations skipped
                         if skipped_impls and len(skipped_impls) == len(results):
-                            logger.info(f"○ {test_name}: All implementations skipped (unsupported type)")
+                            logger.info(f"[SKIP] {test_name}: All implementations skipped (unsupported type)")
                         else:
-                            logger.error(f"✗ {test_name}: Implementations differ")
+                            logger.error(f"[FAIL] {test_name}: Implementations differ")
                             
                             # Show skipped implementations
                             if skipped_impls:
@@ -450,15 +450,15 @@ class SwhidHarness:
                         # Get the SWHID from any successful result
                         swhid = next((r.swhid for r in results.values() if r.success), None)
                         if swhid:
-                            logger.info(f"✓ {test_name}: All implementations match - {swhid}")
+                            logger.info(f"[PASS] {test_name}: All implementations match - {swhid}")
                         else:
-                            logger.info(f"✓ {test_name}: All implementations match")
+                            logger.info(f"[PASS] {test_name}: All implementations match")
                     else:
                         # Check if all implementations skipped
                         if skipped_impls and len(skipped_impls) == len(results):
-                            logger.info(f"○ {test_name}: All implementations skipped (unsupported type)")
+                            logger.info(f"[SKIP] {test_name}: All implementations skipped (unsupported type)")
                         else:
-                            logger.error(f"✗ {test_name}: Implementations differ")
+                            logger.error(f"[FAIL] {test_name}: Implementations differ")
                             
                             # Show skipped implementations
                             if skipped_impls:
@@ -702,15 +702,15 @@ class SwhidHarness:
                                    for phrase in ["not supported", "doesn't support", "does not support", "unsupported"])]
                 
                 if comparison.all_match:
-                    logger.info(f"✓ {payload_name}: All implementations match")
+                    logger.info(f"[PASS] {payload_name}: All implementations match")
                     if expected_swhid:
                         logger.info(f"  Expected: {expected_swhid}")
                 else:
                     # Check if all implementations skipped
                     if skipped_impls and len(skipped_impls) == len(results):
-                        logger.info(f"○ {payload_name}: All implementations skipped (unsupported type)")
+                        logger.info(f"[SKIP] {payload_name}: All implementations skipped (unsupported type)")
                     else:
-                        logger.error(f"✗ {payload_name}: Implementations differ")
+                        logger.error(f"[FAIL] {payload_name}: Implementations differ")
                     
                     # Show expected result if available
                     if expected_swhid:
@@ -1145,7 +1145,7 @@ class SwhidHarness:
                 unique_failed = sorted(set(failed))
                 print(f"  {impl_id}: {len(unique_failed)} test(s)")
                 for test_id in unique_failed:
-                    print(f"    ✗ {test_id}")
+                    print(f"    [FAIL] {test_id}")
             else:
                 print(f"  {impl_id}: 0 failed")
         
@@ -1218,7 +1218,7 @@ class SwhidHarness:
         if disagreement_tests:
             print(f"\nDisagreements summary ({len(disagreement_tests)} test(s) with disagreements):")
             for disc in disagreement_tests:
-                print(f"\n  ✗ {disc['test_id']} ({disc['category']})")
+                print(f"\n  [FAIL] {disc['test_id']} ({disc['category']})")
                 
                 # Show expected result status
                 if disc['has_expected']:
@@ -1233,9 +1233,9 @@ class SwhidHarness:
                         for i, (swhid, impls) in enumerate(sorted(disc['swhid_groups'].items()), 1):
                             match_indicator = ""
                             if disc['has_expected'] and swhid == disc['expected_swhid']:
-                                match_indicator = " ✓ (matches expected)"
+                                match_indicator = " [PASS] (matches expected)"
                             elif disc['has_expected']:
-                                match_indicator = " ✗ (differs from expected)"
+                                match_indicator = " [FAIL] (differs from expected)"
                             print(f"      Group {i}: {swhid}{match_indicator}")
                             print(f"        Implementations: {', '.join(sorted(impls))}")
                     else:
@@ -1244,9 +1244,9 @@ class SwhidHarness:
                         impls = list(disc['swhid_groups'].values())[0]
                         match_indicator = ""
                         if disc['has_expected'] and swhid == disc['expected_swhid']:
-                            match_indicator = " ✓ (matches expected)"
+                            match_indicator = " [PASS] (matches expected)"
                         elif disc['has_expected']:
-                            match_indicator = " ✗ (differs from expected)"
+                            match_indicator = " [FAIL] (differs from expected)"
                         print(f"    Computed SWHID: {swhid}{match_indicator}")
                         print(f"      Implementations: {', '.join(sorted(impls))}")
                 
@@ -1366,7 +1366,7 @@ class SwhidHarness:
             print("\nFailed Tests:")
             for result in results:
                 if not result.all_match:
-                    print(f"\n  ✗ {result.payload_name}")
+                    print(f"\n  [FAIL] {result.payload_name}")
                     
                     # Show expected result if available
                     if result.expected_swhid:
@@ -1448,7 +1448,7 @@ def main():
             impl = harness.discovery.get_implementation(impl_name)
             if impl:
                 info = impl.get_info()
-                available = "✓" if impl.is_available() else "✗"
+                available = "[OK]" if impl.is_available() else "[FAIL]"
                 print(f"  {available} {impl_name}: {info.description} (v{info.version})")
         return
     
@@ -1460,7 +1460,7 @@ def main():
                 name = payload.get("name", "unnamed")
                 path = payload.get("path", "")
                 expected = payload.get("expected_swhid")
-                status = "✓" if expected else "○"
+                status = "[PASS]" if expected else "[SKIP]"
                 print(f"    {status} {name}: {path}")
         return
     

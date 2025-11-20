@@ -80,7 +80,10 @@ class Implementation(SwhidImplementation):
     
     def _build_binary(self, project_root: str, use_git_feature: bool) -> str:
         """Build the Rust binary, optionally enabling the git feature."""
-        binary_path = Path(project_root) / "target" / "release" / "swhid"
+        import platform
+        # On Windows, the binary is swhid.exe, on Unix it's swhid
+        binary_name = "swhid.exe" if platform.system() == "Windows" else "swhid"
+        binary_path = Path(project_root) / "target" / "release" / binary_name
         build_cmd = ["cargo", "build", "--release"]
         if use_git_feature:
             build_cmd.extend(["--features", "git"])
@@ -109,7 +112,9 @@ class Implementation(SwhidImplementation):
 
     def _ensure_binary_built(self, project_root: str, needs_git: bool = False) -> str:
         """Ensure the Rust binary is built (with git feature if needed) and return its path."""
-        binary_path = self._binary_path_cache or str(Path(project_root) / "target" / "release" / "swhid")
+        import platform
+        binary_name = "swhid.exe" if platform.system() == "Windows" else "swhid"
+        binary_path = self._binary_path_cache or str(Path(project_root) / "target" / "release" / binary_name)
         
         # If git feature is required but we haven't built with it yet, build now
         if needs_git and not self._git_build_ready:
