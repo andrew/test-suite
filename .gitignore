@@ -95,3 +95,6 @@ payloads/git-repository/complex_merges/.git/
 # Ignore .git directories in git-repository test payloads
 payloads/git-repository/*/.git/
 payloads/git-repository/*/
+
+# Ignore synthetic git repos created by harness
+payloads/git/synthetic/
