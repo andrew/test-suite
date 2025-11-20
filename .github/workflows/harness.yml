@@ -94,6 +94,9 @@ jobs:
             echo "Attempting to clone swhid-rs from $SWHID_RS_REPO"
             # Use HTTPS with token if available (for private repos)
             if [[ "$SWHID_RS_REPO" == https://* ]]; then
+              # Force HTTPS by disabling SSH and avoiding system Git configs
+              unset GIT_SSH_COMMAND
+              export GIT_CONFIG_NOSYSTEM=1
               if [ -n "$SWHID_RS_TOKEN" ]; then
                 # Use dedicated token for private repo access
                 REPO_URL="${SWHID_RS_REPO/https:\/\//https:\/\/$SWHID_RS_TOKEN@}"
