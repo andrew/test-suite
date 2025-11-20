@@ -612,6 +612,10 @@ class SwhidHarness:
             
             for payload in category_payloads:
                 payload_path = payload["path"]
+                # Resolve to absolute path relative to config file directory
+                if not os.path.isabs(payload_path):
+                    config_dir = os.path.dirname(os.path.abspath(self.config_path))
+                    payload_path = os.path.join(config_dir, payload_path)
                 payload_name = payload["name"]
                 expected_swhid = payload.get("expected_swhid")
                 
@@ -809,6 +813,10 @@ class SwhidHarness:
         for category, payloads in self.config["payloads"].items():
             for payload in payloads:
                 payload_path = payload["path"]
+                # Resolve to absolute path relative to config file directory
+                if not os.path.isabs(payload_path):
+                    config_dir = os.path.dirname(os.path.abspath(self.config_path))
+                    payload_path = os.path.join(config_dir, payload_path)
                 payload_name = payload["name"]
                 
                 if not os.path.exists(payload_path):
