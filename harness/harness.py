@@ -620,14 +620,26 @@ class SwhidHarness:
                 expected_swhid = payload.get("expected_swhid")
                 
                 # Ensure git payloads exist by creating synthetic repos on-the-fly
-                if category == "git" and not os.path.exists(payload_path):
-                    try:
-                        self._create_minimal_git_repo(payload_path)
-                        logger.info(f"Created synthetic git payload at: {payload_path}")
-                    except Exception as e:
-                        logger.warning(f"Payload not found: {payload_path}")
-                        logger.debug(f"Failed to create git payload: {e}")
-                        continue
+                # Check if it's a valid Git repository, not just if the directory exists
+                if category == "git":
+                    is_git_repo = False
+                    if os.path.exists(payload_path):
+                        # Check if it's actually a Git repository
+                        git_dir = os.path.join(payload_path, ".git")
+                        is_git_repo = os.path.exists(git_dir) or (
+                            os.path.exists(os.path.join(payload_path, "HEAD")) and
+                            os.path.exists(os.path.join(payload_path, "refs")) and
+                            os.path.exists(os.path.join(payload_path, "objects"))
+                        )
+                    
+                    if not is_git_repo:
+                        try:
+                            self._create_minimal_git_repo(payload_path)
+                            logger.info(f"Created synthetic git payload at: {payload_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to create synthetic git payload at: {payload_path}")
+                            logger.debug(f"Error: {e}")
+                            continue
                 elif not os.path.exists(payload_path):
                     logger.warning(f"Payload not found: {payload_path} - will emit SKIPPED status")
                     # Emit SKIPPED status for missing payloads
