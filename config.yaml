@@ -119,7 +119,7 @@ payloads:
     path: payloads/directory/edge_cases/unicode_normalization/
   git:
   - description: Synthetic Git repo with main, feature, and a tag
-    expected_swhid: swh:1:snp:352cda5f11c8adf649c60ca0f06e7aada144db38
+    expected_swhid: swh:1:snp:8cd1b580ad6f983730e983e33ef6bad3f3fc0c67
     name: synthetic_repo
     path: payloads/git/synthetic/
   - description: Git repo with snapshot branches in alphabetical order (alpha, beta, gamma, zeta) - tests branch ordering
