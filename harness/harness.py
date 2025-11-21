@@ -1164,7 +1164,11 @@ class SwhidHarness:
                 non_skipped_statuses = {r.status for r in non_skipped_results}
                 
                 # Check if all non-skipped implementations agree (same SWHID)
-                if len(non_skipped_statuses) == 1 and "PASS" in non_skipped_statuses and len(swhids) <= 1:
+                # Must have at least one non-skipped result and all must agree
+                if (len(non_skipped_results) > 0 and 
+                    len(non_skipped_statuses) == 1 and 
+                    "PASS" in non_skipped_statuses and 
+                    len(swhids) == 1):
                     # All non-skipped implementations agree on SWHID
                     pass  # all_agree_on_this_test remains True
                 else:
