@@ -1,0 +1,408 @@
+name: SWHID Testing Harness (Ubuntu - Scheduled)
+
+on:
+  schedule:
+    - cron: "17 2 * * *"  # Nightly deep run at 2:17 AM UTC
+  workflow_dispatch:  # Allow manual triggering from GitHub Actions UI
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: ["3.12"]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for commit info
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgit2-dev pkg-config libssl-dev
+        continue-on-error: true
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev] psutil
+      
+      - name: Install Software Heritage Python tools
+        shell: bash
+        run: |
+          pip install swh.model swh.core || echo "Warning: swh Python tools not available, some implementations may be skipped"
+        continue-on-error: true
+      
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+        continue-on-error: true
+      
+      - name: Setup SSH for private repository access
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "${{ secrets.SWHID_RS_SSH_KEY }}" ]; then
+            echo "${{ secrets.SWHID_RS_SSH_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+            echo "SSH key configured for private repository access"
+          else
+            echo "No SSH key provided - will try HTTPS with token if available"
+          fi
+        continue-on-error: true
+      
+      - name: Clone and build swhid-rs
+        id: swhid-rs-setup
+        shell: bash
+        env:
+          SWHID_RS_REPO: ${{ secrets.SWHID_RS_REPO || 'https://github.com/swhid/swhid-rs.git' }}
+          SWHID_RS_TOKEN: ${{ secrets.SWHID_RS_TOKEN }}
+        run: |
+          set +e
+          # Try to clone the swhid-rs repository
+          if [ -n "$SWHID_RS_REPO" ]; then
+            echo "Attempting to clone swhid-rs from $SWHID_RS_REPO"
+            # Use HTTPS with token if available (for private repos)
+            if [[ "$SWHID_RS_REPO" == https://* ]]; then
+              # Force HTTPS by disabling SSH and avoiding system Git configs
+              echo "=== Debug: Git configuration before clone ==="
+              echo "Git version: $(git --version)"
+              echo "GIT_SSH_COMMAND: ${GIT_SSH_COMMAND:-<unset>}"
+              echo "GIT_CONFIG_NOSYSTEM: ${GIT_CONFIG_NOSYSTEM:-<unset>}"
+              echo "SSH key exists: $([ -f ~/.ssh/id_rsa ] && echo 'yes' || echo 'no')"
+              git config --global --list 2>/dev/null | grep -E "(url|ssh)" || echo "No global URL/SSH configs"
+              git config --system --list 2>/dev/null | grep -E "(url|ssh)" || echo "No system URL/SSH configs"
+              echo "Testing URL parsing..."
+              echo "Original URL: $SWHID_RS_REPO"
+              echo "=== End debug ==="
+              
+              # Completely disable SSH for this operation
+              unset GIT_SSH_COMMAND
+              unset GIT_SSH
+              export GIT_CONFIG_NOSYSTEM=1
+              export GIT_SSH_VARIANT=simple
+              export GIT_TERMINAL_PROMPT=0
+              
+              if [ -n "$SWHID_RS_TOKEN" ]; then
+                # Use dedicated token for private repo access
+                # Construct URL properly: extract domain and path, then rebuild with token
+                REPO_URL="https://${SWHID_RS_TOKEN}@${SWHID_RS_REPO#https://}"
+                echo "Using token for private repository access"
+                echo "Repository URL (masked): https://***@${SWHID_RS_REPO#https://}"
+                echo "Attempting clone with explicit HTTPS..."
+                # Unset GIT_SSH_COMMAND (don't set to empty string) and force HTTPS
+                (unset GIT_SSH_COMMAND; unset GIT_SSH; GIT_CONFIG_NOSYSTEM=1 git clone "$REPO_URL" /tmp/swhid-rs 2>&1) | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
+              elif [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+                # Fallback to GITHUB_TOKEN if available
+                GITHUB_TOKEN_VALUE="${{ secrets.GITHUB_TOKEN }}"
+                REPO_URL="https://${GITHUB_TOKEN_VALUE}@${SWHID_RS_REPO#https://}"
+                echo "Using GITHUB_TOKEN for repository access"
+                echo "Repository URL (masked): https://***@${SWHID_RS_REPO#https://}"
+                echo "Attempting clone with explicit HTTPS..."
+                (unset GIT_SSH_COMMAND; unset GIT_SSH; GIT_CONFIG_NOSYSTEM=1 git clone "$REPO_URL" /tmp/swhid-rs 2>&1) | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
+              else
+                # Try public access (will fail for private repos)
+                echo "No token available, attempting public access"
+                echo "Attempting clone with explicit HTTPS..."
+                (unset GIT_SSH_COMMAND; unset GIT_SSH; GIT_CONFIG_NOSYSTEM=1 git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1) | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
+              fi
+            else
+              # SSH URL - use SSH key if configured
+              git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+              CLONE_EXIT_CODE=${PIPESTATUS[0]}
+            fi
+            if [ $CLONE_EXIT_CODE -eq 0 ] && [ -d /tmp/swhid-rs ]; then
+              cd /tmp/swhid-rs
+              echo "Building swhid-rs..."
+              cargo build --release 2>&1 | tee /tmp/swhid-rs-build.log
+              BUILD_EXIT_CODE=${PIPESTATUS[0]}
+              if [ $BUILD_EXIT_CODE -eq 0 ]; then
+                echo "swhid-rs built successfully"
+                echo "SWHID_RS_PATH=/tmp/swhid-rs" >> $GITHUB_ENV
+                echo "swhid_rs_available=true" >> $GITHUB_ENV
+                echo "✅ swhid-rs is available" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "swhid-rs build failed (exit code: $BUILD_EXIT_CODE)"
+                echo "Last 20 lines of build log:"
+                tail -20 /tmp/swhid-rs-build.log || true
+                echo "swhid_rs_available=false" >> $GITHUB_ENV
+                echo "⚠️ swhid-rs build failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "swhid-rs repository clone failed (exit code: $CLONE_EXIT_CODE)"
+              if [ -f /tmp/swhid-rs-clone.log ]; then
+                echo "Clone log:"
+                cat /tmp/swhid-rs-clone.log
+              fi
+              if [ ! -d /tmp/swhid-rs ]; then
+                echo "Directory /tmp/swhid-rs does not exist"
+              fi
+              echo "swhid_rs_available=false" >> $GITHUB_ENV
+              echo "ℹ️ swhid-rs repository not accessible - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "SWHID_RS_REPO not configured"
+            echo "swhid_rs_available=false" >> $GITHUB_ENV
+            echo "ℹ️ SWHID_RS_REPO not configured - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          set -e
+        continue-on-error: true
+      
+      - name: Run harness unit tests
+        run: |
+          pytest tests/unit/ tests/integration/ -v --tb=short
+      
+      - name: Download previous run state (if available)
+        uses: actions/download-artifact@v4
+        with:
+          name: upstream-state
+          path: previous-state
+        continue-on-error: true
+      
+      - name: Check for upstream changes
+        id: check-changes
+        shell: bash
+        run: |
+          echo "## 🔍 Checking for Upstream Changes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          CHANGES_DETECTED=false
+          
+          # Get current state
+          CURRENT_TEST_SUITE_SHA=$(git rev-parse HEAD)
+          CURRENT_SWHID_RS_SHA=""
+          CURRENT_SWH_MODEL_VERSION=""
+          CURRENT_SWH_CORE_VERSION=""
+          
+          # Check changes in test-suite repository
+          echo "### Test Suite Repository" >> $GITHUB_STEP_SUMMARY
+          if [ -f previous-state/test-suite-sha.txt ]; then
+            PREVIOUS_SHA=$(cat previous-state/test-suite-sha.txt)
+            if [ "$CURRENT_TEST_SUITE_SHA" != "$PREVIOUS_SHA" ]; then
+              echo "⚠️ **Changes detected in test-suite repository**" >> $GITHUB_STEP_SUMMARY
+              echo "Previous: \`${PREVIOUS_SHA:0:7}\` → Current: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+              echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
+              git log --oneline ${PREVIOUS_SHA}..${CURRENT_TEST_SUITE_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
+              CHANGES_DETECTED=true
+            else
+              echo "✅ No changes in test-suite repository" >> $GITHUB_STEP_SUMMARY
+              echo "Current commit: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "ℹ️ No previous state found (first run or artifact expired)" >> $GITHUB_STEP_SUMMARY
+            echo "Current commit: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+            CHANGES_DETECTED=true  # Assume changes on first run
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check changes in swhid-rs repository
+          echo "### swhid-rs Repository" >> $GITHUB_STEP_SUMMARY
+          if [ -d /tmp/swhid-rs ] && [ -f /tmp/swhid-rs/.git/config ]; then
+            cd /tmp/swhid-rs
+            CURRENT_SWHID_RS_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+            CURRENT_COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "")
+            if [ -n "$CURRENT_SWHID_RS_SHA" ]; then
+              echo "Current commit: \`${CURRENT_SWHID_RS_SHA:0:7}\` - $CURRENT_COMMIT_MSG" >> $GITHUB_STEP_SUMMARY
+              
+              # Compare with previous state
+              if [ -f ../previous-state/swhid-rs-sha.txt ]; then
+                PREVIOUS_SHA=$(cat ../previous-state/swhid-rs-sha.txt)
+                if [ "$CURRENT_SWHID_RS_SHA" != "$PREVIOUS_SHA" ]; then
+                  echo "⚠️ **New commits in swhid-rs**" >> $GITHUB_STEP_SUMMARY
+                  echo "Previous: \`${PREVIOUS_SHA:0:7}\` → Current: \`${CURRENT_SWHID_RS_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+                  echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
+                  git log --oneline ${PREVIOUS_SHA}..${CURRENT_SWHID_RS_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
+                  CHANGES_DETECTED=true
+                else
+                  echo "✅ swhid-rs unchanged since last run" >> $GITHUB_STEP_SUMMARY
+                fi
+              else
+                # Try to fetch and compare with remote
+                git fetch origin 2>/dev/null || true
+                REMOTE_SHA=$(git rev-parse origin/HEAD 2>/dev/null || echo "")
+                if [ -n "$REMOTE_SHA" ] && [ "$CURRENT_SWHID_RS_SHA" != "$REMOTE_SHA" ]; then
+                  echo "⚠️ **New commits available in swhid-rs**" >> $GITHUB_STEP_SUMMARY
+                  echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
+                  git log --oneline ${CURRENT_SWHID_RS_SHA}..${REMOTE_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
+                  CHANGES_DETECTED=true
+                else
+                  echo "✅ swhid-rs is up to date" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            fi
+            cd - > /dev/null
+          else
+            echo "ℹ️ swhid-rs repository not available" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check for updates in swh Python packages
+          echo "### Software Heritage Python Packages" >> $GITHUB_STEP_SUMMARY
+          PACKAGES="swh.model swh.core"
+          for package in $PACKAGES; do
+            INSTALLED_VERSION=$(pip show $package 2>/dev/null | grep "^Version:" | awk '{print $2}' || echo "not installed")
+            if [ "$INSTALLED_VERSION" != "not installed" ]; then
+              # Store version for state file
+              if [ "$package" = "swh.model" ]; then
+                CURRENT_SWH_MODEL_VERSION="$INSTALLED_VERSION"
+              elif [ "$package" = "swh.core" ]; then
+                CURRENT_SWH_CORE_VERSION="$INSTALLED_VERSION"
+              fi
+              
+              # Compare with previous state
+              if [ -f previous-state/${package}-version.txt ]; then
+                PREVIOUS_VERSION=$(cat previous-state/${package}-version.txt)
+                if [ "$INSTALLED_VERSION" != "$PREVIOUS_VERSION" ]; then
+                  echo "⚠️ **$package**: Previous: \`$PREVIOUS_VERSION\` → Current: \`$INSTALLED_VERSION\`" >> $GITHUB_STEP_SUMMARY
+                  CHANGES_DETECTED=true
+                else
+                  echo "✅ **$package**: \`$INSTALLED_VERSION\` (unchanged)" >> $GITHUB_STEP_SUMMARY
+                fi
+              else
+                # Check PyPI for latest version
+                LATEST_VERSION=$(pip index versions $package 2>/dev/null | grep "LATEST:" | awk '{print $2}' || echo "")
+                if [ -n "$LATEST_VERSION" ] && [ "$INSTALLED_VERSION" != "$LATEST_VERSION" ]; then
+                  echo "⚠️ **$package**: Installed: \`$INSTALLED_VERSION\`, Latest: \`$LATEST_VERSION\`" >> $GITHUB_STEP_SUMMARY
+                  CHANGES_DETECTED=true
+                else
+                  echo "✅ **$package**: \`$INSTALLED_VERSION\` (latest)" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            else
+              echo "ℹ️ **$package**: Not installed" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Summary
+          if [ "$CHANGES_DETECTED" = "true" ]; then
+            echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Changes detected upstream** - Full test suite will run" >> $GITHUB_STEP_SUMMARY
+            echo "changes_detected=true" >> $GITHUB_ENV
+          else
+            echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **No upstream changes detected** - Running full test suite anyway" >> $GITHUB_STEP_SUMMARY
+            echo "changes_detected=false" >> $GITHUB_ENV
+          fi
+          
+          # Save current state for next run
+          mkdir -p current-state
+          echo "$CURRENT_TEST_SUITE_SHA" > current-state/test-suite-sha.txt
+          if [ -n "$CURRENT_SWHID_RS_SHA" ]; then
+            echo "$CURRENT_SWHID_RS_SHA" > current-state/swhid-rs-sha.txt
+          fi
+          if [ -n "$CURRENT_SWH_MODEL_VERSION" ]; then
+            echo "$CURRENT_SWH_MODEL_VERSION" > current-state/swh.model-version.txt
+          fi
+          if [ -n "$CURRENT_SWH_CORE_VERSION" ]; then
+            echo "$CURRENT_SWH_CORE_VERSION" > current-state/swh.core-version.txt
+          fi
+        continue-on-error: true
+      
+      - name: Upload current state for next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-state
+          path: current-state
+          retention-days: 90
+        continue-on-error: true
+      
+      - name: Run full test suite (all categories and implementations)
+        shell: bash
+        run: |
+          # Scheduled and manual runs test all categories with all available implementations
+          # The harness will automatically skip implementations that are not available
+          if [ "${{ env.changes_detected }}" = "true" ]; then
+            echo "Running full test suite due to upstream changes..."
+          else
+            echo "Running full test suite (no upstream changes detected, but running anyway)..."
+          fi
+          swhid-harness --output-format canonical --dashboard-output results.json || true
+          echo "Full test suite completed (some implementations may be skipped)"
+      
+      - name: Generate HTML results table
+        if: always()
+        shell: bash
+        run: |
+          if [ -f results.json ]; then
+            python scripts/view_results.py results.json --output results.html || echo "Warning: Could not generate HTML table"
+            if [ -f results.html ]; then
+              echo "✅ HTML results table generated: results.html" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ No results.json file found, skipping HTML generation" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            results.json
+            results.html
+          retention-days: 30
+      
+      - name: Generate test summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f results.json ]; then
+            # Generate statistics
+            python3 -c "import json; fp=open('results.json'); d=json.load(fp); fp.close(); a=d.get('aggregates',{}); b=a.get('by_implementation',{}); p=sum(s.get('passed',0) for s in b.values()); fa=sum(s.get('failed',0) for s in b.values()); sk=sum(s.get('skipped',0) for s in b.values()); t=p+fa+sk; r=(p/t*100) if t>0 else 0; print(f'| Metric | Value |'); print(f'|--------|-------|'); print(f'| Total Tests | {t} |'); print(f'| Passed | {p} |'); print(f'| Failed | {fa} |'); print(f'| Skipped | {sk} |'); print(f'| Success Rate | {r:.1f}% |') if b else print('| Note | Results format not recognized |')" >> $GITHUB_STEP_SUMMARY 2>&1 || echo "| Note | Error parsing results |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Add link to HTML results if available
+            if [ -f results.html ]; then
+              echo "### 📊 Detailed Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "📥 Download the [HTML results table](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) from the artifacts." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "The HTML table provides a color-coded view of all test results across all implementations." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Note | No results file (harness tests may have been skipped) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  performance-baseline:
+    needs: test
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Update performance baselines
+        run: |
+          echo "Performance baseline update would go here"
+          # This would update baseline performance files
+          # and detect regressions
+

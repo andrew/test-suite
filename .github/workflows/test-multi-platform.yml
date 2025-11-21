@@ -1,12 +1,8 @@
-name: SWHID Testing Harness
+name: SWHID Testing Harness (Multi-Platform)
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
   schedule:
-    - cron: "17 2 * * *"  # Nightly deep run at 2:17 AM UTC
+    - cron: "17 2 * * 6"  # Weekly run on Saturdays at 2:17 AM UTC
   workflow_dispatch:  # Allow manual triggering from GitHub Actions UI
 
 jobs:
@@ -17,31 +13,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04]
-        python-version: ["3.10", "3.12"]
-        include:
-          # Additional OS configurations for scheduled/manual runs only
-          - os: macos-14
-            python-version: "3.12"
-          - os: windows-2022
-            python-version: "3.12"
+        os: [ubuntu-24.04, macos-14, windows-2022]
+        python-version: ["3.12"]
     
     steps:
       - name: Checkout code
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Full history for commit info
           token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Set up Python
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       
       - name: Install system dependencies
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
@@ -56,13 +43,11 @@ jobs:
         continue-on-error: true
       
       - name: Install Python dependencies
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev] psutil
       
       - name: Install Software Heritage Python tools
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
@@ -75,14 +60,12 @@ jobs:
         continue-on-error: true
       
       - name: Setup Rust toolchain
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
         continue-on-error: true
       
       - name: Setup SSH for private repository access
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           mkdir -p ~/.ssh
@@ -97,7 +80,6 @@ jobs:
         continue-on-error: true
       
       - name: Clone and build swhid-rs
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         id: swhid-rs-setup
         shell: bash
         env:
@@ -198,20 +180,11 @@ jobs:
         continue-on-error: true
       
       - name: Run harness unit tests
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         run: |
           pytest tests/unit/ tests/integration/ -v --tb=short
       
-      - name: Run harness with built-in implementations only
-        if: (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (matrix.os == 'ubuntu-24.04')
-        run: |
-          # Test harness with implementations that are guaranteed to be available
-          # (git and pygit2 use Python packages, no external tools needed)
-          swhid-harness --impl git,pygit2 --category content --output-format canonical --dashboard-output results.json || true
-          echo "Harness test with built-in implementations completed"
-      
       - name: Download previous run state (if available)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.os == 'ubuntu-24.04' && matrix.python-version == '3.12'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
           name: upstream-state
@@ -219,7 +192,7 @@ jobs:
         continue-on-error: true
       
       - name: Check for upstream changes
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.os == 'ubuntu-24.04' && matrix.python-version == '3.12'
+        if: matrix.os == 'ubuntu-24.04'
         id: check-changes
         shell: bash
         run: |
@@ -365,7 +338,7 @@ jobs:
         continue-on-error: true
       
       - name: Upload current state for next run
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && always() && matrix.os == 'ubuntu-24.04' && matrix.python-version == '3.12'
+        if: always() && matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@v4
         with:
           name: upstream-state
@@ -374,7 +347,6 @@ jobs:
         continue-on-error: true
       
       - name: Run full test suite (all categories and implementations)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04')
         shell: bash
         run: |
           # Scheduled and manual runs test all categories with all available implementations
@@ -388,7 +360,7 @@ jobs:
           echo "Full test suite completed (some implementations may be skipped)"
       
       - name: Generate HTML results table
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04')
+        if: always()
         shell: bash
         run: |
           if [ -f results.json ]; then
@@ -402,7 +374,7 @@ jobs:
         continue-on-error: true
       
       - name: Upload test results
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ matrix.os }}-py${{ matrix.python-version }}
@@ -412,7 +384,7 @@ jobs:
           retention-days: 30
       
       - name: Generate test summary
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04')
+        if: always()
         shell: bash
         run: |
           echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
@@ -433,91 +405,24 @@ jobs:
             echo "| Note | No results file (harness tests may have been skipped) |" >> $GITHUB_STEP_SUMMARY
           fi
 
-  publish-dashboard:
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    
-    steps:
-      - name: Checkout code
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Download all artifacts
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      
-      - name: Set up Python
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
-      
-      - name: Install dependencies
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
-      
-      - name: Merge results
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        shell: bash
-        run: |
-          # Create a simple HTML summary if merge_results.py doesn't exist
-          if [ -f tools/merge_results.py ]; then
-            python tools/merge_results.py artifacts/**/results.json --site site
-          else
-            mkdir -p site
-            echo "<html><body><h1>Test Results</h1><p>Results are available in the artifacts.</p></body></html>" > site/index.html
-          fi
-      
-      - name: Configure Pages
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        uses: actions/configure-pages@v5
-        continue-on-error: true
-      
-      - name: Upload Pages artifact
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-        continue-on-error: true
-      
-      - name: Deploy to GitHub Pages
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
-        uses: actions/deploy-pages@v4
-        continue-on-error: true
-
   performance-baseline:
     needs: test
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     
     steps:
       - name: Checkout code
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Download artifacts
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
       
       - name: Update performance baselines
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.os == 'ubuntu-24.04'
         run: |
           echo "Performance baseline update would go here"
           # This would update baseline performance files
           # and detect regressions
+

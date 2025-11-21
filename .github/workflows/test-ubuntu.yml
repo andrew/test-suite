@@ -1,0 +1,282 @@
+name: SWHID Testing Harness (Ubuntu)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: ["3.10", "3.12"]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for commit info
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgit2-dev pkg-config libssl-dev
+        continue-on-error: true
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev] psutil
+      
+      - name: Install Software Heritage Python tools
+        shell: bash
+        run: |
+          pip install swh.model swh.core || echo "Warning: swh Python tools not available, some implementations may be skipped"
+        continue-on-error: true
+      
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+        continue-on-error: true
+      
+      - name: Setup SSH for private repository access
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "${{ secrets.SWHID_RS_SSH_KEY }}" ]; then
+            echo "${{ secrets.SWHID_RS_SSH_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+            echo "SSH key configured for private repository access"
+          else
+            echo "No SSH key provided - will try HTTPS with token if available"
+          fi
+        continue-on-error: true
+      
+      - name: Clone and build swhid-rs
+        id: swhid-rs-setup
+        shell: bash
+        env:
+          SWHID_RS_REPO: ${{ secrets.SWHID_RS_REPO || 'https://github.com/swhid/swhid-rs.git' }}
+          SWHID_RS_TOKEN: ${{ secrets.SWHID_RS_TOKEN }}
+        run: |
+          set +e
+          # Try to clone the swhid-rs repository
+          if [ -n "$SWHID_RS_REPO" ]; then
+            echo "Attempting to clone swhid-rs from $SWHID_RS_REPO"
+            # Use HTTPS with token if available (for private repos)
+            if [[ "$SWHID_RS_REPO" == https://* ]]; then
+              # Force HTTPS by disabling SSH and avoiding system Git configs
+              echo "=== Debug: Git configuration before clone ==="
+              echo "Git version: $(git --version)"
+              echo "GIT_SSH_COMMAND: ${GIT_SSH_COMMAND:-<unset>}"
+              echo "GIT_CONFIG_NOSYSTEM: ${GIT_CONFIG_NOSYSTEM:-<unset>}"
+              echo "SSH key exists: $([ -f ~/.ssh/id_rsa ] && echo 'yes' || echo 'no')"
+              git config --global --list 2>/dev/null | grep -E "(url|ssh)" || echo "No global URL/SSH configs"
+              git config --system --list 2>/dev/null | grep -E "(url|ssh)" || echo "No system URL/SSH configs"
+              echo "Testing URL parsing..."
+              echo "Original URL: $SWHID_RS_REPO"
+              echo "=== End debug ==="
+              
+              # Completely disable SSH for this operation
+              unset GIT_SSH_COMMAND
+              unset GIT_SSH
+              export GIT_CONFIG_NOSYSTEM=1
+              export GIT_SSH_VARIANT=simple
+              export GIT_TERMINAL_PROMPT=0
+              
+              if [ -n "$SWHID_RS_TOKEN" ]; then
+                # Use dedicated token for private repo access
+                # Construct URL properly: extract domain and path, then rebuild with token
+                REPO_URL="https://${SWHID_RS_TOKEN}@${SWHID_RS_REPO#https://}"
+                echo "Using token for private repository access"
+                echo "Repository URL (masked): https://***@${SWHID_RS_REPO#https://}"
+                echo "Attempting clone with explicit HTTPS..."
+                # Unset GIT_SSH_COMMAND (don't set to empty string) and force HTTPS
+                (unset GIT_SSH_COMMAND; unset GIT_SSH; GIT_CONFIG_NOSYSTEM=1 git clone "$REPO_URL" /tmp/swhid-rs 2>&1) | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
+              elif [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+                # Fallback to GITHUB_TOKEN if available
+                GITHUB_TOKEN_VALUE="${{ secrets.GITHUB_TOKEN }}"
+                REPO_URL="https://${GITHUB_TOKEN_VALUE}@${SWHID_RS_REPO#https://}"
+                echo "Using GITHUB_TOKEN for repository access"
+                echo "Repository URL (masked): https://***@${SWHID_RS_REPO#https://}"
+                echo "Attempting clone with explicit HTTPS..."
+                (unset GIT_SSH_COMMAND; unset GIT_SSH; GIT_CONFIG_NOSYSTEM=1 git clone "$REPO_URL" /tmp/swhid-rs 2>&1) | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
+              else
+                # Try public access (will fail for private repos)
+                echo "No token available, attempting public access"
+                echo "Attempting clone with explicit HTTPS..."
+                (unset GIT_SSH_COMMAND; unset GIT_SSH; GIT_CONFIG_NOSYSTEM=1 git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1) | tee /tmp/swhid-rs-clone.log
+                CLONE_EXIT_CODE=${PIPESTATUS[0]}
+              fi
+            else
+              # SSH URL - use SSH key if configured
+              git clone "$SWHID_RS_REPO" /tmp/swhid-rs 2>&1 | tee /tmp/swhid-rs-clone.log
+              CLONE_EXIT_CODE=${PIPESTATUS[0]}
+            fi
+            if [ $CLONE_EXIT_CODE -eq 0 ] && [ -d /tmp/swhid-rs ]; then
+              cd /tmp/swhid-rs
+              echo "Building swhid-rs..."
+              cargo build --release 2>&1 | tee /tmp/swhid-rs-build.log
+              BUILD_EXIT_CODE=${PIPESTATUS[0]}
+              if [ $BUILD_EXIT_CODE -eq 0 ]; then
+                echo "swhid-rs built successfully"
+                echo "SWHID_RS_PATH=/tmp/swhid-rs" >> $GITHUB_ENV
+                echo "swhid_rs_available=true" >> $GITHUB_ENV
+                echo "✅ swhid-rs is available" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "swhid-rs build failed (exit code: $BUILD_EXIT_CODE)"
+                echo "Last 20 lines of build log:"
+                tail -20 /tmp/swhid-rs-build.log || true
+                echo "swhid_rs_available=false" >> $GITHUB_ENV
+                echo "⚠️ swhid-rs build failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "swhid-rs repository clone failed (exit code: $CLONE_EXIT_CODE)"
+              if [ -f /tmp/swhid-rs-clone.log ]; then
+                echo "Clone log:"
+                cat /tmp/swhid-rs-clone.log
+              fi
+              if [ ! -d /tmp/swhid-rs ]; then
+                echo "Directory /tmp/swhid-rs does not exist"
+              fi
+              echo "swhid_rs_available=false" >> $GITHUB_ENV
+              echo "ℹ️ swhid-rs repository not accessible - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "SWHID_RS_REPO not configured"
+            echo "swhid_rs_available=false" >> $GITHUB_ENV
+            echo "ℹ️ SWHID_RS_REPO not configured - Rust implementation will be skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          set -e
+        continue-on-error: true
+      
+      - name: Run harness unit tests
+        run: |
+          pytest tests/unit/ tests/integration/ -v --tb=short
+      
+      - name: Run harness with built-in implementations only
+        run: |
+          # Test harness with implementations that are guaranteed to be available
+          # (git and pygit2 use Python packages, no external tools needed)
+          swhid-harness --impl git,pygit2 --category content --output-format canonical --dashboard-output results.json || true
+          echo "Harness test with built-in implementations completed"
+      
+      - name: Generate HTML results table
+        if: always()
+        shell: bash
+        run: |
+          if [ -f results.json ]; then
+            python scripts/view_results.py results.json --output results.html || echo "Warning: Could not generate HTML table"
+            if [ -f results.html ]; then
+              echo "✅ HTML results table generated: results.html" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ No results.json file found, skipping HTML generation" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            results.json
+            results.html
+          retention-days: 30
+      
+      - name: Generate test summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f results.json ]; then
+            # Generate statistics
+            python3 -c "import json; fp=open('results.json'); d=json.load(fp); fp.close(); a=d.get('aggregates',{}); b=a.get('by_implementation',{}); p=sum(s.get('passed',0) for s in b.values()); fa=sum(s.get('failed',0) for s in b.values()); sk=sum(s.get('skipped',0) for s in b.values()); t=p+fa+sk; r=(p/t*100) if t>0 else 0; print(f'| Metric | Value |'); print(f'|--------|-------|'); print(f'| Total Tests | {t} |'); print(f'| Passed | {p} |'); print(f'| Failed | {fa} |'); print(f'| Skipped | {sk} |'); print(f'| Success Rate | {r:.1f}% |') if b else print('| Note | Results format not recognized |')" >> $GITHUB_STEP_SUMMARY 2>&1 || echo "| Note | Error parsing results |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Add link to HTML results if available
+            if [ -f results.html ]; then
+              echo "### 📊 Detailed Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "📥 Download the [HTML results table](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) from the artifacts." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "The HTML table provides a color-coded view of all test results across all implementations." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Note | No results file (harness tests may have been skipped) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  publish-dashboard:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      
+      - name: Merge results
+        shell: bash
+        run: |
+          # Create a simple HTML summary if merge_results.py doesn't exist
+          if [ -f tools/merge_results.py ]; then
+            python tools/merge_results.py artifacts/**/results.json --site site
+          else
+            mkdir -p site
+            echo "<html><body><h1>Test Results</h1><p>Results are available in the artifacts.</p></body></html>" > site/index.html
+          fi
+      
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+      
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+        continue-on-error: true
+      
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
