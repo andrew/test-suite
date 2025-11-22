@@ -266,17 +266,33 @@ jobs:
             echo "<html><body><h1>Test Results</h1><p>Results are available in the artifacts.</p></body></html>" > site/index.html
           fi
       
+      - name: Check if Pages is enabled
+        id: pages-check
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            try {
+              await github.rest.pages.get({ owner: context.repo.owner, repo: context.repo.repo });
+              core.setOutput('enabled', 'true');
+            } catch (error) {
+              core.setOutput('enabled', 'false');
+            }
+      
       - name: Configure Pages
+        if: steps.pages-check.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
         continue-on-error: true
       
       - name: Upload Pages artifact
+        if: steps.pages-check.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
         continue-on-error: true
       
       - name: Deploy to GitHub Pages
+        if: steps.pages-check.outputs.enabled == 'true'
         uses: actions/deploy-pages@v4
         continue-on-error: true
 
