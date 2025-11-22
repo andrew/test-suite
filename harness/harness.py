@@ -673,8 +673,23 @@ class SwhidHarness:
                 expected_swhid = payload.get("expected_swhid")
                 
                 # Ensure git payloads exist by creating synthetic repos on-the-fly
-                # Check if it's a valid Git repository, not just if the directory exists
-                if category == "git":
+                # For synthetic repos, always recreate to ensure consistency
+                if category == "git" and payload_name == "synthetic_repo":
+                    try:
+                        # Remove existing repo if it exists to ensure clean recreation
+                        if os.path.exists(payload_path):
+                            import shutil
+                            if os.path.exists(os.path.join(payload_path, ".git")):
+                                shutil.rmtree(payload_path)
+                                os.makedirs(payload_path, exist_ok=True)
+                        self._create_minimal_git_repo(payload_path)
+                        logger.info(f"Created/recreated synthetic git payload at: {payload_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create synthetic git payload at: {payload_path}")
+                        logger.debug(f"Error: {e}")
+                        continue
+                elif category == "git":
+                    # For other git payloads, check if it's a valid Git repository
                     is_git_repo = False
                     if os.path.exists(payload_path):
                         # Check if it's actually a Git repository
@@ -830,6 +845,7 @@ class SwhidHarness:
         This is used to test snapshot identifiers.
         
         Uses fixed timestamps to ensure deterministic commit hashes across runs.
+        All operations use fixed dates and explicit configurations for reproducibility.
         """
         import subprocess
         import pathlib
@@ -837,31 +853,37 @@ class SwhidHarness:
         path = pathlib.Path(repo_path)
         path.mkdir(parents=True, exist_ok=True)
 
-        # Fixed timestamp for deterministic commits (2020-01-01 00:00:00 UTC)
+        # Fixed timestamp for deterministic commits and tags (2020-01-01 00:00:00 UTC)
         fixed_date = "2020-01-01T00:00:00+0000"
         env = os.environ.copy()
         env["GIT_AUTHOR_DATE"] = fixed_date
         env["GIT_COMMITTER_DATE"] = fixed_date
+        # Also set TZ to UTC to avoid timezone issues
+        env["TZ"] = "UTC"
 
-        # Initialize repo
-        subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
-        # Configure user
+        # Initialize repo with explicit default branch name for consistency
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo_path, check=True, capture_output=True)
+        # Configure user (required for commits)
         subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_path, check=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True)
+        # Disable GPG signing for tags to ensure deterministic tag objects
+        subprocess.run(["git", "config", "tag.gpgSign", "false"], cwd=repo_path, check=True)
+        
         # Create a file and commit
         (path / "README.md").write_text("# Sample Repo\n")
-        subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True)
+        subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True, 
                       capture_output=True, env=env)
         # Create a branch 'feature'
         subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo_path, check=True, capture_output=True)
         (path / "FEATURE.txt").write_text("feature\n")
-        subprocess.run(["git", "add", "FEATURE.txt"], cwd=repo_path, check=True)
+        subprocess.run(["git", "add", "FEATURE.txt"], cwd=repo_path, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True, 
                       capture_output=True, env=env)
         # Switch back to main
         subprocess.run(["git", "checkout", "-B", "main"], cwd=repo_path, check=True, capture_output=True)
-        # Create an annotated tag (with fixed date)
+        # Create an annotated tag with explicit date for deterministic tag objects
+        # Use GIT_COMMITTER_DATE and GIT_AUTHOR_DATE for tag creation
         subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True, 
                       capture_output=True, env=env)
     
