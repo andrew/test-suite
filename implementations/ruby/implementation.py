@@ -18,7 +18,7 @@ class Implementation(SwhidImplementation):
         """Return implementation metadata."""
         return ImplementationInfo(
             name="ruby",
-            version="0.3.0",
+            version="0.3.1",
             language="ruby",
             description="Ruby SWHID implementation via swhid gem",
             test_command="swhid --help",
