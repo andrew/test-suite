@@ -853,12 +853,10 @@ class SwhidHarness:
         path = pathlib.Path(repo_path)
         path.mkdir(parents=True, exist_ok=True)
 
-        # Fixed timestamp for deterministic commits and tags (2020-01-01 00:00:00 UTC)
-        fixed_date = "2020-01-01T00:00:00+0000"
+        # Fixed timestamp for deterministic commits and tags
+        # Use Unix timestamp format like Git's test suite (1112911993 = 2005-04-07)
+        test_tick = 1112911993
         env = os.environ.copy()
-        env["GIT_AUTHOR_DATE"] = fixed_date
-        env["GIT_COMMITTER_DATE"] = fixed_date
-        # Also set TZ to UTC to avoid timezone issues
         env["TZ"] = "UTC"
 
         # Initialize repo with explicit default branch name for consistency
@@ -866,25 +864,36 @@ class SwhidHarness:
         # Configure user (required for commits)
         subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_path, check=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True)
-        # Disable GPG signing for tags to ensure deterministic tag objects
+        # Disable GPG signing for commits and tags to ensure deterministic objects
+        subprocess.run(["git", "config", "commit.gpgSign", "false"], cwd=repo_path, check=True)
         subprocess.run(["git", "config", "tag.gpgSign", "false"], cwd=repo_path, check=True)
-        
-        # Create a file and commit
+
+        # Create a file and commit (first timestamp)
+        env["GIT_AUTHOR_DATE"] = f"{test_tick} +0000"
+        env["GIT_COMMITTER_DATE"] = f"{test_tick} +0000"
         (path / "README.md").write_text("# Sample Repo\n")
         subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True, 
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True,
                       capture_output=True, env=env)
-        # Create a branch 'feature'
+
+        # Create a branch 'feature' and second commit (increment timestamp)
+        test_tick += 60
+        env["GIT_AUTHOR_DATE"] = f"{test_tick} +0000"
+        env["GIT_COMMITTER_DATE"] = f"{test_tick} +0000"
         subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo_path, check=True, capture_output=True)
         (path / "FEATURE.txt").write_text("feature\n")
         subprocess.run(["git", "add", "FEATURE.txt"], cwd=repo_path, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True, 
+        subprocess.run(["git", "commit", "-m", "Add feature"], cwd=repo_path, check=True,
                       capture_output=True, env=env)
+
         # Switch back to main
         subprocess.run(["git", "checkout", "-B", "main"], cwd=repo_path, check=True, capture_output=True)
-        # Create an annotated tag with explicit date for deterministic tag objects
-        # Use GIT_COMMITTER_DATE and GIT_AUTHOR_DATE for tag creation
-        subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True, 
+
+        # Create an annotated tag (increment timestamp)
+        test_tick += 60
+        env["GIT_AUTHOR_DATE"] = f"{test_tick} +0000"
+        env["GIT_COMMITTER_DATE"] = f"{test_tick} +0000"
+        subprocess.run(["git", "tag", "-a", "v1.0", "-m", "Release v1.0"], cwd=repo_path, check=True,
                       capture_output=True, env=env)
     
     def generate_expected_results(self, implementation: str = "python"):
