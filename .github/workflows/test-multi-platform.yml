@@ -6,7 +6,210 @@ on:
   workflow_dispatch:  # Allow manual triggering from GitHub Actions UI
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      changes_detected: ${{ steps.check-changes.outputs.changes_detected }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      
+      - name: Install Software Heritage Python tools
+        shell: bash
+        run: |
+          pip install swh.model swh.core || echo "Warning: swh Python tools not available"
+        continue-on-error: true
+      
+      - name: Find previous workflow run
+        id: find-previous-run
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            try {
+              const workflowRuns = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: context.workflow,
+                status: 'success',
+                per_page: 2
+              });
+              
+              if (workflowRuns.data.workflow_runs.length < 2) {
+                console.log('No previous successful run found');
+                core.setOutput('artifact_id', '');
+                return;
+              }
+              
+              const previousRun = workflowRuns.data.workflow_runs[1];
+              console.log(`Found previous run: ${previousRun.id}`);
+              
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: previousRun.id
+              });
+              
+              const upstreamStateArtifact = artifacts.data.artifacts.find(a => a.name === 'upstream-state');
+              
+              if (!upstreamStateArtifact) {
+                console.log('upstream-state artifact not found in previous run');
+                core.setOutput('artifact_id', '');
+                return;
+              }
+              
+              console.log(`Found upstream-state artifact: ${upstreamStateArtifact.id}`);
+              core.setOutput('artifact_id', upstreamStateArtifact.id.toString());
+            } catch (error) {
+              console.log(`Error finding previous run: ${error.message}`);
+              core.setOutput('artifact_id', '');
+            }
+      
+      - name: Download previous run state (if available)
+        if: steps.find-previous-run.outputs.artifact_id != ''
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p previous-state
+          ARTIFACT_ID="${{ steps.find-previous-run.outputs.artifact_id }}"
+          
+          curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/upstream-state.zip
+          
+          if [ -f /tmp/upstream-state.zip ] && [ -s /tmp/upstream-state.zip ]; then
+            unzip -q /tmp/upstream-state.zip -d /tmp/ 2>/dev/null || true
+            if [ -d /tmp/upstream-state ]; then
+              mv /tmp/upstream-state/* previous-state/ 2>/dev/null || true
+              rmdir /tmp/upstream-state 2>/dev/null || true
+            fi
+            echo "Successfully downloaded previous state"
+          else
+            echo "Failed to download artifact or artifact is empty"
+            mkdir -p previous-state
+          fi
+      
+      - name: Check for upstream changes
+        id: check-changes
+        shell: bash
+        run: |
+          echo "## 🔍 Checking for Upstream Changes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          CHANGES_DETECTED=false
+          
+          # Get current state
+          CURRENT_TEST_SUITE_SHA=$(git rev-parse HEAD)
+          CURRENT_SWH_MODEL_VERSION=""
+          CURRENT_SWH_CORE_VERSION=""
+          
+          # Check changes in test-suite repository
+          echo "### Test Suite Repository" >> $GITHUB_STEP_SUMMARY
+          if [ -f previous-state/test-suite-sha.txt ]; then
+            PREVIOUS_SHA=$(cat previous-state/test-suite-sha.txt)
+            if [ "$CURRENT_TEST_SUITE_SHA" != "$PREVIOUS_SHA" ]; then
+              echo "⚠️ **Changes detected in test-suite repository**" >> $GITHUB_STEP_SUMMARY
+              echo "Previous: \`${PREVIOUS_SHA:0:7}\` → Current: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+              echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
+              git log --oneline ${PREVIOUS_SHA}..${CURRENT_TEST_SUITE_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
+              CHANGES_DETECTED=true
+            else
+              echo "✅ No changes in test-suite repository" >> $GITHUB_STEP_SUMMARY
+              echo "Current commit: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "ℹ️ No previous state found (first run or artifact expired)" >> $GITHUB_STEP_SUMMARY
+            echo "Current commit: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
+            CHANGES_DETECTED=true
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check for updates in swh Python packages
+          echo "### Software Heritage Python Packages" >> $GITHUB_STEP_SUMMARY
+          PACKAGES="swh.model swh.core"
+          for package in $PACKAGES; do
+            INSTALLED_VERSION=$(pip show $package 2>/dev/null | grep "^Version:" | awk '{print $2}' || echo "not installed")
+            if [ "$INSTALLED_VERSION" != "not installed" ]; then
+              if [ "$package" = "swh.model" ]; then
+                CURRENT_SWH_MODEL_VERSION="$INSTALLED_VERSION"
+              elif [ "$package" = "swh.core" ]; then
+                CURRENT_SWH_CORE_VERSION="$INSTALLED_VERSION"
+              fi
+              
+              if [ -f previous-state/${package}-version.txt ]; then
+                PREVIOUS_VERSION=$(cat previous-state/${package}-version.txt)
+                if [ "$INSTALLED_VERSION" != "$PREVIOUS_VERSION" ]; then
+                  echo "⚠️ **$package**: Previous: \`$PREVIOUS_VERSION\` → Current: \`$INSTALLED_VERSION\`" >> $GITHUB_STEP_SUMMARY
+                  CHANGES_DETECTED=true
+                else
+                  echo "✅ **$package**: \`$INSTALLED_VERSION\` (unchanged)" >> $GITHUB_STEP_SUMMARY
+                fi
+              else
+                LATEST_VERSION=$(pip index versions $package 2>/dev/null | grep "LATEST:" | awk '{print $2}' || echo "")
+                if [ -n "$LATEST_VERSION" ] && [ "$INSTALLED_VERSION" != "$LATEST_VERSION" ]; then
+                  echo "⚠️ **$package**: Installed: \`$INSTALLED_VERSION\`, Latest: \`$LATEST_VERSION\`" >> $GITHUB_STEP_SUMMARY
+                  CHANGES_DETECTED=true
+                else
+                  echo "✅ **$package**: \`$INSTALLED_VERSION\` (latest)" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            else
+              echo "ℹ️ **$package**: Not installed" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Summary
+          if [ "$CHANGES_DETECTED" = "true" ]; then
+            echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Changes detected upstream** - Test suite will run" >> $GITHUB_STEP_SUMMARY
+            echo "changes_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **No upstream changes detected** - Skipping test suite to save resources" >> $GITHUB_STEP_SUMMARY
+            echo "changes_detected=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Save current state for next run
+          mkdir -p current-state
+          echo "$CURRENT_TEST_SUITE_SHA" > current-state/test-suite-sha.txt
+          if [ -n "$CURRENT_SWH_MODEL_VERSION" ]; then
+            echo "$CURRENT_SWH_MODEL_VERSION" > current-state/swh.model-version.txt
+          fi
+          if [ -n "$CURRENT_SWH_CORE_VERSION" ]; then
+            echo "$CURRENT_SWH_CORE_VERSION" > current-state/swh.core-version.txt
+          fi
+        continue-on-error: true
+      
+      - name: Upload current state for next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-state
+          path: current-state
+          retention-days: 90
+        continue-on-error: true
+
   test:
+    needs: check-changes
+    if: needs.check-changes.outputs.changes_detected == 'true'
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -183,247 +386,12 @@ jobs:
         run: |
           pytest tests/unit/ tests/integration/ -v --tb=short
       
-      - name: Find previous workflow run
-        if: matrix.os == 'ubuntu-24.04'
-        id: find-previous-run
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          script: |
-            try {
-              // Find the previous successful workflow run
-              const workflowRuns = await github.rest.actions.listWorkflowRuns({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: context.workflow,
-                status: 'success',
-                per_page: 2
-              });
-              
-              if (workflowRuns.data.workflow_runs.length < 2) {
-                console.log('No previous successful run found');
-                core.setOutput('artifact_id', '');
-                return;
-              }
-              
-              // Get the previous run (skip the current one)
-              const previousRun = workflowRuns.data.workflow_runs[1];
-              console.log(`Found previous run: ${previousRun.id}`);
-              
-              // List artifacts from the previous run
-              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: previousRun.id
-              });
-              
-              const upstreamStateArtifact = artifacts.data.artifacts.find(a => a.name === 'upstream-state');
-              
-              if (!upstreamStateArtifact) {
-                console.log('upstream-state artifact not found in previous run');
-                core.setOutput('artifact_id', '');
-                return;
-              }
-              
-              console.log(`Found upstream-state artifact: ${upstreamStateArtifact.id}`);
-              core.setOutput('artifact_id', upstreamStateArtifact.id.toString());
-            } catch (error) {
-              console.log(`Error finding previous run: ${error.message}`);
-              core.setOutput('artifact_id', '');
-            }
-      
-      - name: Download previous run state (if available)
-        if: matrix.os == 'ubuntu-24.04' && steps.find-previous-run.outputs.artifact_id != ''
-        shell: bash
-        continue-on-error: true
-        run: |
-          mkdir -p previous-state
-          ARTIFACT_ID="${{ steps.find-previous-run.outputs.artifact_id }}"
-          
-          # Download artifact using GitHub API with authentication
-          curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${ARTIFACT_ID}/zip" \
-            -o /tmp/upstream-state.zip
-          
-          if [ -f /tmp/upstream-state.zip ] && [ -s /tmp/upstream-state.zip ]; then
-            unzip -q /tmp/upstream-state.zip -d /tmp/ 2>/dev/null || true
-            # Artifacts are zipped with a directory, so we need to move files up one level
-            if [ -d /tmp/upstream-state ]; then
-              mv /tmp/upstream-state/* previous-state/ 2>/dev/null || true
-              rmdir /tmp/upstream-state 2>/dev/null || true
-            fi
-            echo "Successfully downloaded previous state"
-          else
-            echo "Failed to download artifact or artifact is empty"
-            mkdir -p previous-state
-          fi
-      
-      - name: Check for upstream changes
-        if: matrix.os == 'ubuntu-24.04'
-        id: check-changes
-        shell: bash
-        run: |
-          echo "## 🔍 Checking for Upstream Changes" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          CHANGES_DETECTED=false
-          
-          # Get current state
-          CURRENT_TEST_SUITE_SHA=$(git rev-parse HEAD)
-          CURRENT_SWHID_RS_SHA=""
-          CURRENT_SWH_MODEL_VERSION=""
-          CURRENT_SWH_CORE_VERSION=""
-          
-          # Check changes in test-suite repository
-          echo "### Test Suite Repository" >> $GITHUB_STEP_SUMMARY
-          if [ -f previous-state/test-suite-sha.txt ]; then
-            PREVIOUS_SHA=$(cat previous-state/test-suite-sha.txt)
-            if [ "$CURRENT_TEST_SUITE_SHA" != "$PREVIOUS_SHA" ]; then
-              echo "⚠️ **Changes detected in test-suite repository**" >> $GITHUB_STEP_SUMMARY
-              echo "Previous: \`${PREVIOUS_SHA:0:7}\` → Current: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
-              echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
-              git log --oneline ${PREVIOUS_SHA}..${CURRENT_TEST_SUITE_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
-              CHANGES_DETECTED=true
-            else
-              echo "✅ No changes in test-suite repository" >> $GITHUB_STEP_SUMMARY
-              echo "Current commit: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "ℹ️ No previous state found (first run or artifact expired)" >> $GITHUB_STEP_SUMMARY
-            echo "Current commit: \`${CURRENT_TEST_SUITE_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
-            CHANGES_DETECTED=true  # Assume changes on first run
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check changes in swhid-rs repository
-          echo "### swhid-rs Repository" >> $GITHUB_STEP_SUMMARY
-          if [ -d /tmp/swhid-rs ] && [ -f /tmp/swhid-rs/.git/config ]; then
-            cd /tmp/swhid-rs
-            CURRENT_SWHID_RS_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
-            CURRENT_COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "")
-            if [ -n "$CURRENT_SWHID_RS_SHA" ]; then
-              echo "Current commit: \`${CURRENT_SWHID_RS_SHA:0:7}\` - $CURRENT_COMMIT_MSG" >> $GITHUB_STEP_SUMMARY
-              
-              # Compare with previous state
-              if [ -f ../previous-state/swhid-rs-sha.txt ]; then
-                PREVIOUS_SHA=$(cat ../previous-state/swhid-rs-sha.txt)
-                if [ "$CURRENT_SWHID_RS_SHA" != "$PREVIOUS_SHA" ]; then
-                  echo "⚠️ **New commits in swhid-rs**" >> $GITHUB_STEP_SUMMARY
-                  echo "Previous: \`${PREVIOUS_SHA:0:7}\` → Current: \`${CURRENT_SWHID_RS_SHA:0:7}\`" >> $GITHUB_STEP_SUMMARY
-                  echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
-                  git log --oneline ${PREVIOUS_SHA}..${CURRENT_SWHID_RS_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
-                  CHANGES_DETECTED=true
-                else
-                  echo "✅ swhid-rs unchanged since last run" >> $GITHUB_STEP_SUMMARY
-                fi
-              else
-                # Try to fetch and compare with remote
-                git fetch origin 2>/dev/null || true
-                REMOTE_SHA=$(git rev-parse origin/HEAD 2>/dev/null || echo "")
-                if [ -n "$REMOTE_SHA" ] && [ "$CURRENT_SWHID_RS_SHA" != "$REMOTE_SHA" ]; then
-                  echo "⚠️ **New commits available in swhid-rs**" >> $GITHUB_STEP_SUMMARY
-                  echo "Recent commits:" >> $GITHUB_STEP_SUMMARY
-                  git log --oneline ${CURRENT_SWHID_RS_SHA}..${REMOTE_SHA} | head -5 >> $GITHUB_STEP_SUMMARY || true
-                  CHANGES_DETECTED=true
-                else
-                  echo "✅ swhid-rs is up to date" >> $GITHUB_STEP_SUMMARY
-                fi
-              fi
-            fi
-            cd - > /dev/null
-          else
-            echo "ℹ️ swhid-rs repository not available" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for updates in swh Python packages
-          echo "### Software Heritage Python Packages" >> $GITHUB_STEP_SUMMARY
-          # On Windows, only swh.model is installed (swh.core has incompatible test data)
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            PACKAGES="swh.model"
-          else
-            PACKAGES="swh.model swh.core"
-          fi
-          for package in $PACKAGES; do
-            INSTALLED_VERSION=$(pip show $package 2>/dev/null | grep "^Version:" | awk '{print $2}' || echo "not installed")
-            if [ "$INSTALLED_VERSION" != "not installed" ]; then
-              # Store version for state file
-              if [ "$package" = "swh.model" ]; then
-                CURRENT_SWH_MODEL_VERSION="$INSTALLED_VERSION"
-              elif [ "$package" = "swh.core" ]; then
-                CURRENT_SWH_CORE_VERSION="$INSTALLED_VERSION"
-              fi
-              
-              # Compare with previous state
-              if [ -f previous-state/${package}-version.txt ]; then
-                PREVIOUS_VERSION=$(cat previous-state/${package}-version.txt)
-                if [ "$INSTALLED_VERSION" != "$PREVIOUS_VERSION" ]; then
-                  echo "⚠️ **$package**: Previous: \`$PREVIOUS_VERSION\` → Current: \`$INSTALLED_VERSION\`" >> $GITHUB_STEP_SUMMARY
-                  CHANGES_DETECTED=true
-                else
-                  echo "✅ **$package**: \`$INSTALLED_VERSION\` (unchanged)" >> $GITHUB_STEP_SUMMARY
-                fi
-              else
-                # Check PyPI for latest version
-                LATEST_VERSION=$(pip index versions $package 2>/dev/null | grep "LATEST:" | awk '{print $2}' || echo "")
-                if [ -n "$LATEST_VERSION" ] && [ "$INSTALLED_VERSION" != "$LATEST_VERSION" ]; then
-                  echo "⚠️ **$package**: Installed: \`$INSTALLED_VERSION\`, Latest: \`$LATEST_VERSION\`" >> $GITHUB_STEP_SUMMARY
-                  CHANGES_DETECTED=true
-                else
-                  echo "✅ **$package**: \`$INSTALLED_VERSION\` (latest)" >> $GITHUB_STEP_SUMMARY
-                fi
-              fi
-            else
-              echo "ℹ️ **$package**: Not installed" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Summary
-          if [ "$CHANGES_DETECTED" = "true" ]; then
-            echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
-            echo "⚠️ **Changes detected upstream** - Full test suite will run" >> $GITHUB_STEP_SUMMARY
-            echo "changes_detected=true" >> $GITHUB_ENV
-          else
-            echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
-            echo "✅ **No upstream changes detected** - Running full test suite anyway" >> $GITHUB_STEP_SUMMARY
-            echo "changes_detected=false" >> $GITHUB_ENV
-          fi
-          
-          # Save current state for next run
-          mkdir -p current-state
-          echo "$CURRENT_TEST_SUITE_SHA" > current-state/test-suite-sha.txt
-          if [ -n "$CURRENT_SWHID_RS_SHA" ]; then
-            echo "$CURRENT_SWHID_RS_SHA" > current-state/swhid-rs-sha.txt
-          fi
-          if [ -n "$CURRENT_SWH_MODEL_VERSION" ]; then
-            echo "$CURRENT_SWH_MODEL_VERSION" > current-state/swh.model-version.txt
-          fi
-          if [ -n "$CURRENT_SWH_CORE_VERSION" ]; then
-            echo "$CURRENT_SWH_CORE_VERSION" > current-state/swh.core-version.txt
-          fi
-        continue-on-error: true
-      
-      - name: Upload current state for next run
-        if: always() && matrix.os == 'ubuntu-24.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: upstream-state
-          path: current-state
-          retention-days: 90
-        continue-on-error: true
-      
       - name: Run full test suite (all categories and implementations)
         shell: bash
         run: |
-          # Scheduled and manual runs test all categories with all available implementations
+          # Run full test suite with all available implementations
           # The harness will automatically skip implementations that are not available
-          if [ "${{ env.changes_detected }}" = "true" ]; then
-            echo "Running full test suite due to upstream changes..."
-          else
-            echo "Running full test suite (no upstream changes detected, but running anyway)..."
-          fi
+          echo "Running full test suite (changes detected upstream)..."
           swhid-harness --output-format canonical --dashboard-output results.json || true
           echo "Full test suite completed (some implementations may be skipped)"
       
@@ -474,8 +442,8 @@ jobs:
           fi
 
   publish-dashboard:
-    needs: test
-    if: github.ref == 'refs/heads/main'
+    needs: [check-changes, test]
+    if: github.ref == 'refs/heads/main' && needs.check-changes.outputs.changes_detected == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
