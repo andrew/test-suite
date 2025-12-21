@@ -103,13 +103,73 @@ class Implementation(SwhidImplementation):
         This preserves the executable bit information from source files,
         which is critical on Windows where filesystem permissions may not
         be preserved during copy operations.
+        
+        On Windows, we check the Git index for the intended permissions,
+        as the filesystem may not preserve executable bits.
         """
         import stat
+        import platform
+        
         permissions = {}
+        
+        # On Windows, try to read permissions from Git index first
+        # This is more reliable than filesystem permissions
+        if platform.system() == 'Windows':
+            try:
+                # Get absolute path to source_dir
+                abs_source_dir = os.path.abspath(source_dir)
+                # Get repository root (walk up to find .git)
+                repo_root = abs_source_dir
+                while repo_root != os.path.dirname(repo_root):
+                    if os.path.exists(os.path.join(repo_root, '.git')):
+                        break
+                    repo_root = os.path.dirname(repo_root)
+                else:
+                    repo_root = None
+                
+                # If we found a repo, check Git index for permissions
+                if repo_root:
+                    for root, dirs, files in os.walk(source_dir):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(file_path, source_dir)
+                            
+                            # Get path relative to repo root
+                            try:
+                                repo_rel_path = os.path.relpath(file_path, repo_root)
+                                # Check Git index
+                                result = subprocess.run(
+                                    ['git', 'ls-files', '--stage', repo_rel_path],
+                                    cwd=repo_root,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=2
+                                )
+                                if result.returncode == 0 and result.stdout.strip():
+                                    # Format: <mode> <sha> <stage> <path>
+                                    parts = result.stdout.strip().split()
+                                    if parts:
+                                        git_mode = parts[0]
+                                        # Mode is octal string, e.g., '100755' for executable
+                                        is_executable = git_mode.endswith('755')
+                                        permissions[rel_path] = is_executable
+                                        continue
+                            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError):
+                                pass
+            except Exception:
+                # If Git check fails, fall back to filesystem
+                pass
+        
+        # Fall back to filesystem permissions (works on Unix, or if Git check failed)
         for root, dirs, files in os.walk(source_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, source_dir)
+                
+                # Skip if we already got permission from Git index
+                if rel_path in permissions:
+                    continue
+                
                 try:
                     stat_info = os.stat(file_path)
                     is_executable = bool(stat_info.st_mode & stat.S_IEXEC)
@@ -117,6 +177,7 @@ class Implementation(SwhidImplementation):
                 except OSError:
                     # If we can't stat the file, assume not executable
                     permissions[rel_path] = False
+        
         return permissions
     
     def _compute_directory_swhid(self, dir_path: str) -> str:
