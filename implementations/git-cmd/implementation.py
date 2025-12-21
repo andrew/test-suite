@@ -97,8 +97,34 @@ class Implementation(SwhidImplementation):
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"git hash-object failed: {e}")
     
+    def _get_source_permissions(self, source_dir):
+        """Read intended permissions from source files before copying.
+        
+        This preserves the executable bit information from source files,
+        which is critical on Windows where filesystem permissions may not
+        be preserved during copy operations.
+        """
+        import stat
+        permissions = {}
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, source_dir)
+                try:
+                    stat_info = os.stat(file_path)
+                    is_executable = bool(stat_info.st_mode & stat.S_IEXEC)
+                    permissions[rel_path] = is_executable
+                except OSError:
+                    # If we can't stat the file, assume not executable
+                    permissions[rel_path] = False
+        return permissions
+    
     def _compute_directory_swhid(self, dir_path: str) -> str:
         """Compute directory SWHID using git commands."""
+        # Read source permissions BEFORE copying (critical for Windows)
+        # This preserves the intended permissions from source files
+        source_permissions = self._get_source_permissions(dir_path) if os.path.isdir(dir_path) else {}
+        
         # Create a temporary Git repository
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_path = os.path.join(temp_dir, "repo")
@@ -151,6 +177,23 @@ class Implementation(SwhidImplementation):
             # The --no-filters flag is only valid for git hash-object, not git add
             subprocess.run(["git", "add", "."], cwd=repo_path, check=True,
                          capture_output=True)
+            
+            # Apply executable bits based on source permissions
+            # This is critical on Windows where filesystem permissions may not be preserved
+            # We use git update-index to set executable bits, which works cross-platform
+            for rel_path, is_executable in source_permissions.items():
+                if is_executable:
+                    # Check if file exists in repo (handle nested paths)
+                    file_path = os.path.join(repo_path, rel_path)
+                    if os.path.exists(file_path):
+                        try:
+                            subprocess.run(
+                                ["git", "update-index", "--chmod=+x", rel_path],
+                                cwd=repo_path, check=True, capture_output=True
+                            )
+                        except subprocess.CalledProcessError:
+                            # If update-index fails, continue (file might not be in index)
+                            pass
             
             # Get the tree hash for the root directory
             result = subprocess.run(

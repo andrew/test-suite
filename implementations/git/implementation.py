@@ -153,14 +153,63 @@ class Implementation(SwhidImplementation):
                 shutil.copy2(dir_path, repo_path)
             
             # Create tree for the root directory
-            tree = self._create_git_tree(repo, repo_path)
+            # Pass source directory for permission preservation (critical on Windows)
+            # Read source permissions once and pass to tree creation
+            source_permissions = self._get_source_permissions(dir_path) if os.path.isdir(dir_path) else {}
+            tree = self._create_git_tree(repo, repo_path, source_dir=dir_path, source_permissions=source_permissions)
             
             tree_id_str = tree.id.decode('ascii')
             return f"swh:1:dir:{tree_id_str}"
     
-    def _create_git_tree(self, repo, dir_path):
-        """Recursively create Git tree objects for a directory."""
+    def _get_source_permissions(self, source_dir):
+        """Read intended permissions from source files.
+        
+        This preserves the executable bit information from source files,
+        which is critical on Windows where filesystem permissions may not
+        be preserved during copy operations.
+        
+        Args:
+            source_dir: Original source directory path
+        
+        Returns:
+            Dict mapping relative file paths to executable status
+        """
+        import stat
+        permissions = {}
+        if not os.path.exists(source_dir) or not os.path.isdir(source_dir):
+            return permissions
+        
+        # Walk the source directory and read permissions
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    # Calculate relative path from source_dir
+                    rel_path = os.path.relpath(file_path, source_dir)
+                    stat_info = os.stat(file_path)
+                    is_executable = bool(stat_info.st_mode & stat.S_IEXEC)
+                    permissions[rel_path] = is_executable
+                except (OSError, ValueError):
+                    # If we can't stat or compute relative path, skip
+                    pass
+        return permissions
+    
+    def _create_git_tree(self, repo, dir_path, source_dir=None, source_permissions=None):
+        """Recursively create Git tree objects for a directory.
+        
+        Args:
+            repo: Dulwich repository object
+            dir_path: Directory path in the temporary repo
+            source_dir: Original source directory (for calculating relative paths)
+            source_permissions: Dict of relative paths to executable status
+        """
         tree = dulwich.objects.Tree()
+        
+        # Use provided source_permissions or read from source_dir
+        if source_permissions is None and source_dir:
+            source_permissions = self._get_source_permissions(source_dir)
+        elif source_permissions is None:
+            source_permissions = {}
         
         # Get all entries in the directory
         entries = []
@@ -188,34 +237,54 @@ class Implementation(SwhidImplementation):
                 blob.data = content
                 repo.object_store.add_object(blob)
                 
-                # Git uses 0o100755 for executable files, 0o100644 for regular files
+                # Determine if file is executable
+                # Priority: 1. Source permissions, 2. Filesystem detection
                 import stat
                 import platform
-                file_mode = os.stat(item_path).st_mode
                 
-                # On Windows, check file extension and try to detect executables
-                # Windows doesn't have reliable executable bit, so we check:
-                # 1. Unix executable bit (if available)
-                # 2. File extension (for Windows)
-                is_executable = False
-                if platform.system() == 'Windows':
-                    # On Windows, check file extension for common executables
-                    ext = os.path.splitext(item_path)[1].lower()
-                    executable_extensions = {'.exe', '.bat', '.cmd', '.com', '.ps1', '.sh'}
-                    is_executable = ext in executable_extensions
-                    # Also check if file has .sh extension (shell script)
-                    if not is_executable and item.endswith('.sh'):
-                        is_executable = True
+                # Calculate relative path for permission lookup
+                # We need to map from repo path back to source path
+                rel_path = None
+                if source_dir:
+                    try:
+                        # Calculate relative path from repo root to current file
+                        # repo_path is the root of the repo
+                        # item_path is the full path to the file in repo
+                        # We need the relative path from repo root
+                        repo_rel_path = os.path.relpath(item_path, repo_path)
+                        # This should match the relative path in source_permissions
+                        rel_path = repo_rel_path.replace(os.sep, '/')  # Normalize separators
+                    except ValueError:
+                        # If paths are on different drives (Windows), use item name
+                        rel_path = item
                 else:
-                    # On Unix-like systems, check executable bit
-                    is_executable = bool(file_mode & stat.S_IEXEC)
+                    rel_path = item
+                
+                is_executable = False
+                if rel_path and rel_path in source_permissions:
+                    # Use source permission (most reliable, especially on Windows)
+                    is_executable = source_permissions[rel_path]
+                else:
+                    # Fall back to filesystem detection
+                    file_mode = os.stat(item_path).st_mode
+                    if platform.system() == 'Windows':
+                        # On Windows, check file extension for common executables
+                        ext = os.path.splitext(item_path)[1].lower()
+                        executable_extensions = {'.exe', '.bat', '.cmd', '.com', '.ps1', '.sh'}
+                        is_executable = ext in executable_extensions
+                        # Also check if file has .sh extension (shell script)
+                        if not is_executable and item.endswith('.sh'):
+                            is_executable = True
+                    else:
+                        # On Unix-like systems, check executable bit
+                        is_executable = bool(file_mode & stat.S_IEXEC)
                 
                 mode = 0o100755 if is_executable else 0o100644
                 entries.append((item.encode(), mode, blob.id))
                 
             elif os.path.isdir(item_path):
                 # Handle subdirectory
-                sub_tree = self._create_git_tree(repo, item_path)
+                sub_tree = self._create_git_tree(repo, item_path, source_dir, source_permissions)
                 entries.append((item.encode(), 0o40000, sub_tree.id))
         
         # Sort entries (Git requires sorted tree entries)
