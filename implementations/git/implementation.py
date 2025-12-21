@@ -156,7 +156,7 @@ class Implementation(SwhidImplementation):
             # Pass source directory for permission preservation (critical on Windows)
             # Read source permissions once and pass to tree creation
             source_permissions = self._get_source_permissions(dir_path) if os.path.isdir(dir_path) else {}
-            tree = self._create_git_tree(repo, repo_path, source_dir=dir_path, source_permissions=source_permissions)
+            tree = self._create_git_tree(repo, repo_path, repo_root=repo_path, source_dir=dir_path, source_permissions=source_permissions)
             
             tree_id_str = tree.id.decode('ascii')
             return f"swh:1:dir:{tree_id_str}"
@@ -194,15 +194,19 @@ class Implementation(SwhidImplementation):
                     pass
         return permissions
     
-    def _create_git_tree(self, repo, dir_path, source_dir=None, source_permissions=None):
+    def _create_git_tree(self, repo, dir_path, repo_root=None, source_dir=None, source_permissions=None):
         """Recursively create Git tree objects for a directory.
         
         Args:
             repo: Dulwich repository object
             dir_path: Directory path in the temporary repo
+            repo_root: Root path of the temporary repo (for calculating relative paths)
             source_dir: Original source directory (for calculating relative paths)
             source_permissions: Dict of relative paths to executable status
         """
+        # If repo_root not provided, use dir_path as root (for backward compatibility)
+        if repo_root is None:
+            repo_root = dir_path
         tree = dulwich.objects.Tree()
         
         # Use provided source_permissions or read from source_dir
@@ -248,10 +252,10 @@ class Implementation(SwhidImplementation):
                 if source_dir:
                     try:
                         # Calculate relative path from repo root to current file
-                        # repo_path is the root of the repo
+                        # repo_root is the root of the repo
                         # item_path is the full path to the file in repo
                         # We need the relative path from repo root
-                        repo_rel_path = os.path.relpath(item_path, repo_path)
+                        repo_rel_path = os.path.relpath(item_path, repo_root)
                         # This should match the relative path in source_permissions
                         rel_path = repo_rel_path.replace(os.sep, '/')  # Normalize separators
                     except ValueError:
@@ -284,7 +288,7 @@ class Implementation(SwhidImplementation):
                 
             elif os.path.isdir(item_path):
                 # Handle subdirectory
-                sub_tree = self._create_git_tree(repo, item_path, source_dir, source_permissions)
+                sub_tree = self._create_git_tree(repo, item_path, repo_root=repo_root, source_dir=source_dir, source_permissions=source_permissions)
                 entries.append((item.encode(), 0o40000, sub_tree.id))
         
         # Sort entries (Git requires sorted tree entries)
