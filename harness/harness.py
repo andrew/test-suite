@@ -1402,8 +1402,10 @@ class SwhidHarness:
         # Print detailed disagreement summary
         disagreement_tests = []
         for test_case in canonical_results.tests:
-            has_expected = test_case.expected.swhid is not None
-            expected_swhid = test_case.expected.swhid
+            has_expected_v1 = test_case.expected.swhid is not None
+            has_expected_v2 = test_case.expected.expected_swhid_sha256 is not None
+            expected_swhid_v1 = test_case.expected.swhid
+            expected_swhid_v2 = test_case.expected.expected_swhid_sha256
             
             # Get all results for this test
             results = test_case.results
@@ -1416,6 +1418,14 @@ class SwhidHarness:
             # Group by SWHID and status
             swhid_groups = {}  # swhid -> list of (impl_id, status)
             failed_impls = []  # list of (impl_id, error_message)
+            
+            # Map implementation to expected value
+            expected_by_impl = {}  # impl_name -> expected_swhid
+            for result in non_skipped_results:
+                if result.implementation.endswith('_v2'):
+                    expected_by_impl[result.implementation] = expected_swhid_v2
+                else:
+                    expected_by_impl[result.implementation] = expected_swhid_v1
             
             for result in non_skipped_results:
                 if result.status == "FAIL":
@@ -1430,15 +1440,20 @@ class SwhidHarness:
             # Check if there's a disagreement
             # Disagreement exists if:
             # - Multiple different SWHIDs
-            # - Or one SWHID but doesn't match expected (when expected exists)
+            # - Or one SWHID but doesn't match expected (when expected exists for that version)
             # - Or there are failures
             has_disagreement = False
             if len(swhid_groups) > 1:
                 has_disagreement = True
-            elif len(swhid_groups) == 1 and has_expected:
+            elif len(swhid_groups) == 1:
                 computed_swhid = list(swhid_groups.keys())[0]
-                if computed_swhid != expected_swhid:
-                    has_disagreement = True
+                impls_in_group = swhid_groups[computed_swhid]
+                # Check if any implementation's result doesn't match its expected
+                for impl_id in impls_in_group:
+                    expected_for_impl = expected_by_impl.get(impl_id)
+                    if expected_for_impl and computed_swhid != expected_for_impl:
+                        has_disagreement = True
+                        break
             elif failed_impls:
                 has_disagreement = True
             
@@ -1446,8 +1461,11 @@ class SwhidHarness:
                 disagreement_tests.append({
                     'test_id': test_case.id,
                     'category': test_case.category,
-                    'has_expected': has_expected,
-                    'expected_swhid': expected_swhid,
+                    'has_expected_v1': has_expected_v1,
+                    'has_expected_v2': has_expected_v2,
+                    'expected_swhid_v1': expected_swhid_v1,
+                    'expected_swhid_v2': expected_swhid_v2,
+                    'expected_by_impl': expected_by_impl,
                     'swhid_groups': swhid_groups,
                     'failed_impls': failed_impls
                 })
