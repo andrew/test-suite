@@ -497,6 +497,73 @@ def create_html_table(results_data: Dict, variant_config: Optional[Dict] = None)
     return '\n'.join(html)
 
 
+def generate_table_for_variant(results_data: Dict, variant_id: str, 
+                               output_dir: Path, registry: VariantRegistry) -> Path:
+    """Generate HTML table for specific variant.
+    
+    Args:
+        results_data: Full results dictionary
+        variant_id: Variant identifier like 'v1_sha1_hex'
+        output_dir: Directory to write output file
+        registry: VariantRegistry instance
+    
+    Returns:
+        Path to generated HTML file
+    """
+    variant_config = registry.get_variant_config(variant_id)
+    if not variant_config:
+        raise ValueError(f"Unknown variant: {variant_id}")
+    
+    # Filter results for this variant
+    filtered_data = filter_results_by_variant(results_data, variant_id, registry)
+    
+    # Generate HTML table
+    html_content = create_html_table(filtered_data, variant_config)
+    
+    # Save to variant-specific file
+    output_file = output_dir / f"results_{variant_id}.html"
+    output_file.write_text(html_content, encoding='utf-8')
+    
+    return output_file
+
+
+def generate_all_tables(results_data: Dict, output_dir: Path, 
+                       registry: VariantRegistry) -> List[Path]:
+    """Generate separate tables for all detected variants.
+    
+    Args:
+        results_data: Full results dictionary
+        output_dir: Directory to write output files
+        registry: VariantRegistry instance
+    
+    Returns:
+        List of paths to generated HTML files
+    """
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Detect all variants in results
+    variants = detect_variants_in_results(results_data, registry)
+    
+    if not variants:
+        # No variants detected - generate single table (backward compatibility)
+        output_file = output_dir / "results.html"
+        html_content = create_html_table(results_data)
+        output_file.write_text(html_content, encoding='utf-8')
+        return [output_file]
+    
+    output_files = []
+    
+    # Generate table for each variant
+    for variant_id in sorted(variants):
+        output_file = generate_table_for_variant(
+            results_data, variant_id, output_dir, registry
+        )
+        output_files.append(output_file)
+    
+    return output_files
+
+
 def create_table_rich(results_data: Dict):
     """Create a rich table with color-coded results."""
     console = Console()
