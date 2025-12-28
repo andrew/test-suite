@@ -172,6 +172,85 @@ class VariantRegistry:
         return self.variants.get(variant_id)
 
 
+def detect_variants_in_results(results_data: Dict, registry: VariantRegistry) -> Set[str]:
+    """Find all variants present in test results.
+    
+    Args:
+        results_data: Results dictionary from JSON file
+        registry: VariantRegistry instance
+    
+    Returns:
+        Set of variant IDs found in the results
+    """
+    variants = set()
+    for test in results_data.get('tests', []):
+        for result in test.get('results', []):
+            swhid = result.get('swhid')
+            if swhid:
+                variant = registry.get_variant_for_swhid(swhid)
+                if variant:
+                    variants.add(variant)
+    return variants
+
+
+def filter_results_by_variant(results_data: Dict, variant_id: str, 
+                              registry: VariantRegistry) -> Dict:
+    """Filter results to only include specified variant.
+    
+    Args:
+        results_data: Full results dictionary
+        variant_id: Variant identifier like 'v1_sha1_hex'
+        registry: VariantRegistry instance
+    
+    Returns:
+        Filtered results dictionary with only tests/results for the specified variant
+    """
+    variant_config = registry.get_variant_config(variant_id)
+    if not variant_config:
+        raise ValueError(f"Unknown variant: {variant_id}")
+    
+    filtered_tests = []
+    
+    for test in results_data.get('tests', []):
+        filtered_results = []
+        for result in test.get('results', []):
+            swhid = result.get('swhid', '')
+            if swhid.startswith(variant_config['swhid_prefix']):
+                # Check hash length matches
+                hash_part = swhid.split(':')[-1]
+                if len(hash_part) == variant_config['hash_length']:
+                    # Additional check: verify serialization format matches
+                    detected_serialization = registry._detect_serialization_format(hash_part)
+                    if detected_serialization == variant_config['serialization']:
+                        filtered_results.append(result)
+        
+        if filtered_results:
+            # Create filtered test with variant-appropriate expected
+            expected_key = variant_config['expected_key']
+            expected = test.get('expected', {})
+            
+            # Get the expected value for this variant
+            expected_value = expected.get(expected_key)
+            
+            # Create filtered expected dict with the variant-specific key
+            filtered_expected = {expected_key: expected_value}
+            
+            filtered_test = {
+                'id': test['id'],
+                'category': test.get('category'),
+                'payload_ref': test.get('payload_ref'),
+                'expected': filtered_expected,
+                'results': filtered_results
+            }
+            filtered_tests.append(filtered_test)
+    
+    return {
+        'run': results_data.get('run'),
+        'implementations': results_data.get('implementations'),
+        'tests': filtered_tests
+    }
+
+
 def determine_cell_status(result: Dict, expected_swhid: Optional[str]) -> Tuple[str, str, Optional[str]]:
     """
     Determine the status, color, and content for a test result cell.

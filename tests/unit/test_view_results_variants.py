@@ -2,7 +2,11 @@
 """Unit tests for variant registry system in view_results.py"""
 
 import unittest
-from scripts.view_results import VariantRegistry
+from scripts.view_results import (
+    VariantRegistry,
+    detect_variants_in_results,
+    filter_results_by_variant,
+)
 
 
 class TestVariantRegistry(unittest.TestCase):
@@ -107,6 +111,108 @@ class TestVariantRegistry(unittest.TestCase):
         self.assertEqual(self.registry._detect_hash_algo_from_length(128), 'sha512')
         self.assertEqual(self.registry._detect_hash_algo_from_length(44), 'sha256')  # base64
         self.assertEqual(self.registry._detect_hash_algo_from_length(99), 'unknown')  # unknown
+
+
+class TestVariantDetection(unittest.TestCase):
+    """Test variant detection and filtering functions."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.registry = VariantRegistry()
+        self.sample_results = {
+            'run': {'id': 'test-run', 'branch': 'main'},
+            'implementations': [
+                {'id': 'rust', 'version': '1.0.0'},
+                {'id': 'python', 'version': '1.0.0'},
+            ],
+            'tests': [
+                {
+                    'id': 'test1',
+                    'category': 'content',
+                    'expected': {
+                        'swhid': 'swh:1:cnt:e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+                        'expected_swhid_sha256': 'swh:2:cnt:473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813',
+                    },
+                    'results': [
+                        {
+                            'implementation': 'rust',
+                            'status': 'PASS',
+                            'swhid': 'swh:1:cnt:e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+                        },
+                        {
+                            'implementation': 'python',
+                            'status': 'PASS',
+                            'swhid': 'swh:2:cnt:473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813',
+                        },
+                    ],
+                },
+            ],
+        }
+    
+    def test_detect_variants_in_results(self):
+        """Test detecting variants present in results."""
+        variants = detect_variants_in_results(self.sample_results, self.registry)
+        self.assertEqual(variants, {'v1_sha1_hex', 'v2_sha256_hex'})
+    
+    def test_detect_variants_empty_results(self):
+        """Test detecting variants in empty results."""
+        empty_results = {'tests': []}
+        variants = detect_variants_in_results(empty_results, self.registry)
+        self.assertEqual(variants, set())
+    
+    def test_filter_results_by_variant_v1(self):
+        """Test filtering results for v1 variant."""
+        filtered = filter_results_by_variant(
+            self.sample_results, 'v1_sha1_hex', self.registry
+        )
+        
+        self.assertEqual(len(filtered['tests']), 1)
+        test = filtered['tests'][0]
+        self.assertEqual(test['id'], 'test1')
+        self.assertEqual(len(test['results']), 1)
+        self.assertEqual(test['results'][0]['implementation'], 'rust')
+        self.assertEqual(test['results'][0]['swhid'], 'swh:1:cnt:e69de29bb2d1d6434b8b29ae775ad8c2e48c5391')
+        
+        # Check expected value is filtered correctly
+        self.assertIn('swhid', test['expected'])
+        self.assertEqual(test['expected']['swhid'], 'swh:1:cnt:e69de29bb2d1d6434b8b29ae775ad8c2e48c5391')
+        self.assertNotIn('expected_swhid_sha256', test['expected'])
+    
+    def test_filter_results_by_variant_v2(self):
+        """Test filtering results for v2 variant."""
+        filtered = filter_results_by_variant(
+            self.sample_results, 'v2_sha256_hex', self.registry
+        )
+        
+        self.assertEqual(len(filtered['tests']), 1)
+        test = filtered['tests'][0]
+        self.assertEqual(test['id'], 'test1')
+        self.assertEqual(len(test['results']), 1)
+        self.assertEqual(test['results'][0]['implementation'], 'python')
+        self.assertEqual(test['results'][0]['swhid'], 'swh:2:cnt:473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813')
+        
+        # Check expected value is filtered correctly
+        self.assertIn('expected_swhid_sha256', test['expected'])
+        self.assertEqual(test['expected']['expected_swhid_sha256'], 'swh:2:cnt:473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813')
+        self.assertNotIn('swhid', test['expected'])
+    
+    def test_filter_results_unknown_variant_raises(self):
+        """Test that filtering with unknown variant raises ValueError."""
+        with self.assertRaises(ValueError):
+            filter_results_by_variant(
+                self.sample_results, 'nonexistent_variant', self.registry
+            )
+    
+    def test_filter_results_preserves_metadata(self):
+        """Test that filtering preserves run and implementation metadata."""
+        filtered = filter_results_by_variant(
+            self.sample_results, 'v1_sha1_hex', self.registry
+        )
+        
+        self.assertIn('run', filtered)
+        self.assertIn('implementations', filtered)
+        self.assertEqual(filtered['run']['id'], 'test-run')
+        self.assertEqual(len(filtered['implementations']), 2)
 
 
 if __name__ == '__main__':
