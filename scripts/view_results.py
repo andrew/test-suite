@@ -15,10 +15,161 @@ This script reads the JSON results file and creates an HTML table showing:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from html import escape
+
+
+class VariantRegistry:
+    """Registry for SWHID variants (version + hash algorithm + serialization format)."""
+    
+    def __init__(self):
+        self.variants: Dict[str, Dict] = {}
+        self._register_defaults()
+    
+    def _register_defaults(self):
+        """Register default v1 and v2 variants."""
+        # v1 SHA1 hex (legacy)
+        self.register_variant('v1_sha1_hex', {
+            'version': 1,
+            'hash_algo': 'sha1',
+            'serialization': 'hex',
+            'expected_key': 'swhid',  # Legacy key name
+            'swhid_prefix': 'swh:1:',
+            'hash_length': 40,  # SHA1 hex length (160 bits = 20 bytes = 40 hex chars)
+        })
+        
+        # v2 SHA256 hex (current)
+        self.register_variant('v2_sha256_hex', {
+            'version': 2,
+            'hash_algo': 'sha256',
+            'serialization': 'hex',
+            'expected_key': 'expected_swhid_sha256',
+            'swhid_prefix': 'swh:2:',
+            'hash_length': 64,  # SHA256 hex length (256 bits = 32 bytes = 64 hex chars)
+        })
+    
+    def register_variant(self, variant_id: str, config: Dict):
+        """Register a new variant.
+        
+        Args:
+            variant_id: Identifier like 'v2_sha256_hex'
+            config: Dictionary with keys: version, hash_algo, serialization, 
+                   expected_key, swhid_prefix, hash_length
+        """
+        required_keys = ['version', 'hash_algo', 'serialization', 'expected_key', 
+                        'swhid_prefix', 'hash_length']
+        for key in required_keys:
+            if key not in config:
+                raise ValueError(f"Variant config missing required key: {key}")
+        
+        self.variants[variant_id] = config.copy()
+    
+    def get_variant_for_swhid(self, swhid: str) -> Optional[str]:
+        """Detect variant from SWHID string format.
+        
+        Args:
+            swhid: SWHID string like 'swh:1:cnt:abc...' or 'swh:2:cnt:def...'
+        
+        Returns:
+            Variant ID like 'v1_sha1_hex' or 'v2_sha256_hex', or None if not detected
+        """
+        if not swhid or not swhid.startswith('swh:'):
+            return None
+        
+        parts = swhid.split(':')
+        if len(parts) < 4:
+            return None
+        
+        version_str = parts[1]  # "1", "2", etc.
+        try:
+            version = int(version_str)
+        except ValueError:
+            return None
+        
+        hash_part = parts[-1]  # Last part is the hash
+        
+        # Detect hash algorithm from length
+        hash_length = len(hash_part)
+        hash_algo = self._detect_hash_algo_from_length(hash_length)
+        
+        # Detect serialization format from character set
+        serialization = self._detect_serialization_format(hash_part)
+        
+        # Build variant ID
+        variant_id = f"v{version}_{hash_algo}_{serialization}"
+        
+        # Check if this variant is registered
+        if variant_id in self.variants:
+            return variant_id
+        
+        # If not registered, try to find a matching variant by version and characteristics
+        # This allows detection of unknown variants for future extensibility
+        return variant_id
+    
+    def _detect_hash_algo_from_length(self, hash_length: int) -> str:
+        """Detect hash algorithm from hash length.
+        
+        Common lengths:
+        - 40 = SHA1 hex (160 bits)
+        - 64 = SHA256 hex (256 bits)
+        - 128 = SHA512 hex (512 bits)
+        - 44 = SHA256 base64 (256 bits, ~32 bytes base64 encoded)
+        - 88 = SHA512 base64 (512 bits, ~64 bytes base64 encoded)
+        """
+        length_to_algo = {
+            40: 'sha1',
+            64: 'sha256',
+            128: 'sha512',
+            44: 'sha256',  # base64 encoded
+            88: 'sha512',  # base64 encoded
+        }
+        return length_to_algo.get(hash_length, 'unknown')
+    
+    def _detect_serialization_format(self, hash_part: str) -> str:
+        """Detect serialization format from hash character set.
+        
+        Args:
+            hash_part: The hash portion of the SWHID
+        
+        Returns:
+            'hex', 'base64', 'base32', or 'unknown'
+        """
+        # Hex: only 0-9, a-f
+        if re.match(r'^[0-9a-f]+$', hash_part):
+            return 'hex'
+        
+        # Base64: A-Z, a-z, 0-9, +, /, = (padding)
+        if re.match(r'^[A-Za-z0-9+/=]+$', hash_part):
+            return 'base64'
+        
+        # Base32: A-Z, 2-7, = (padding), no lowercase, no 0, 1, 8, 9
+        if re.match(r'^[A-Z2-7=]+$', hash_part) and not re.search(r'[01]', hash_part):
+            return 'base32'
+        
+        return 'unknown'
+    
+    def get_expected_key(self, variant_id: str) -> Optional[str]:
+        """Get expected value key for a variant.
+        
+        Args:
+            variant_id: Variant identifier like 'v1_sha1_hex'
+        
+        Returns:
+            Expected key like 'swhid' or 'expected_swhid_sha256', or None
+        """
+        variant = self.variants.get(variant_id)
+        return variant.get('expected_key') if variant else None
+    
+    def list_variants(self) -> List[str]:
+        """List all registered variant IDs."""
+        return sorted(self.variants.keys())
+    
+    def get_variant_config(self, variant_id: str) -> Optional[Dict]:
+        """Get full configuration for a variant."""
+        return self.variants.get(variant_id)
 
 
 def determine_cell_status(result: Dict, expected_swhid: Optional[str]) -> Tuple[str, str, Optional[str]]:
