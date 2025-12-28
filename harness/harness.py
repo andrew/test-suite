@@ -1296,8 +1296,14 @@ class SwhidHarness:
             if statuses == {"SKIPPED"}:
                 fully_skipped += 1
                 for result in results:
-                    impl_stats[result.implementation]["skipped"] += 1
-                    impl_skipped_tests[result.implementation].append(test_case.id)
+                    # Normalize implementation name (strip version suffix)
+                    impl_name_base = result.implementation
+                    if impl_name_base.endswith('_v1') or impl_name_base.endswith('_v2'):
+                        impl_name_base = impl_name_base.rsplit('_', 1)[0]
+                    if impl_name_base not in impl_stats:
+                        impl_stats[impl_name_base] = {"passed": 0, "failed": 0, "skipped": 0}
+                    impl_stats[impl_name_base]["skipped"] += 1
+                    impl_skipped_tests[impl_name_base].append(test_case.id)
             else:
                 # Process each implementation's result
                 all_agree_on_this_test = True
@@ -1317,24 +1323,39 @@ class SwhidHarness:
                 
                 # Count statistics per implementation
                 for result in results:
+                    # Normalize implementation name (strip version suffix for dual-version tests)
+                    impl_name_base = result.implementation
+                    if impl_name_base.endswith('_v1') or impl_name_base.endswith('_v2'):
+                        impl_name_base = impl_name_base.rsplit('_', 1)[0]
+                    
+                    # Ensure normalized name exists in stats
+                    if impl_name_base not in impl_stats:
+                        impl_stats[impl_name_base] = {"passed": 0, "failed": 0, "skipped": 0}
+                    
+                    # Determine which expected value to check based on implementation name
+                    # If implementation name has _v2 suffix, check against v2 expected
+                    check_v2 = result.implementation.endswith('_v2')
+                    expected_to_check = test_case.expected.expected_swhid_sha256 if check_v2 else test_case.expected.swhid
+                    has_expected_for_version = expected_to_check is not None
+                    
                     if result.status == "SKIPPED":
-                        impl_stats[result.implementation]["skipped"] += 1
-                        impl_skipped_tests[result.implementation].append(test_case.id)
+                        impl_stats[impl_name_base]["skipped"] += 1
+                        impl_skipped_tests[impl_name_base].append(test_case.id)
                     elif result.status == "FAIL":
-                        impl_stats[result.implementation]["failed"] += 1
+                        impl_stats[impl_name_base]["failed"] += 1
                         # Always add to failed tests list, regardless of whether expected exists
-                        impl_failed_tests[result.implementation].append(test_case.id)
+                        impl_failed_tests[impl_name_base].append(test_case.id)
                         all_agree_on_this_test = False
                     elif result.status == "PASS":
-                        # Check if it matches expected (if available)
-                        if has_expected and result.swhid != expected_swhid:
+                        # Check if it matches expected (if available for this version)
+                        if has_expected_for_version and result.swhid != expected_to_check:
                             # PASS but wrong SWHID - count as failure
-                            impl_stats[result.implementation]["failed"] += 1
-                            impl_failed_tests[result.implementation].append(test_case.id)
+                            impl_stats[impl_name_base]["failed"] += 1
+                            impl_failed_tests[impl_name_base].append(test_case.id)
                             all_agree_on_this_test = False
                         else:
                             # PASS and matches expected (or no expected) - count as pass
-                            impl_stats[result.implementation]["passed"] += 1
+                            impl_stats[impl_name_base]["passed"] += 1
                 
                 # Update global counters
                 if all_agree_on_this_test:
