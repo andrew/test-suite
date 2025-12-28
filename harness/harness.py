@@ -1476,9 +1476,15 @@ class SwhidHarness:
             for disc in disagreement_tests:
                 print(f"\n  [FAIL] {disc['test_id']} ({disc['category']})")
                 
-                # Show expected result status
-                if disc['has_expected']:
-                    print(f"    Expected: {disc['expected_swhid']}")
+                # Show expected result status (show both v1 and v2 if available)
+                expected_lines = []
+                if disc.get('has_expected_v1'):
+                    expected_lines.append(f"Expected (v1): {disc['expected_swhid_v1']}")
+                if disc.get('has_expected_v2'):
+                    expected_lines.append(f"Expected (v2): {disc['expected_swhid_v2']}")
+                if expected_lines:
+                    for line in expected_lines:
+                        print(f"    {line}")
                 else:
                     print(f"    Expected: (none)")
                 
@@ -1487,22 +1493,30 @@ class SwhidHarness:
                     if len(disc['swhid_groups']) > 1:
                         print(f"    Found {len(disc['swhid_groups'])} different SWHID groups:")
                         for i, (swhid, impls) in enumerate(sorted(disc['swhid_groups'].items()), 1):
-                            match_indicator = ""
-                            if disc['has_expected'] and swhid == disc['expected_swhid']:
-                                match_indicator = " [PASS] (matches expected)"
-                            elif disc['has_expected']:
-                                match_indicator = " [FAIL] (differs from expected)"
+                            # Check if this SWHID matches expected for any implementation in group
+                            matches_any = False
+                            for impl_id in impls:
+                                expected_for_impl = disc.get('expected_by_impl', {}).get(impl_id)
+                                if expected_for_impl and swhid == expected_for_impl:
+                                    matches_any = True
+                                    break
+                            
+                            match_indicator = " [PASS] (matches expected)" if matches_any else " [FAIL] (differs from expected)"
                             print(f"      Group {i}: {swhid}{match_indicator}")
                             print(f"        Implementations: {', '.join(sorted(impls))}")
                     else:
                         # Single group
                         swhid = list(disc['swhid_groups'].keys())[0]
                         impls = list(disc['swhid_groups'].values())[0]
-                        match_indicator = ""
-                        if disc['has_expected'] and swhid == disc['expected_swhid']:
-                            match_indicator = " [PASS] (matches expected)"
-                        elif disc['has_expected']:
-                            match_indicator = " [FAIL] (differs from expected)"
+                        # Check if this SWHID matches expected for any implementation
+                        matches_any = False
+                        for impl_id in impls:
+                            expected_for_impl = disc.get('expected_by_impl', {}).get(impl_id)
+                            if expected_for_impl and swhid == expected_for_impl:
+                                matches_any = True
+                                break
+                        
+                        match_indicator = " [PASS] (matches expected)" if matches_any else " [FAIL] (differs from expected)"
                         print(f"    Computed SWHID: {swhid}{match_indicator}")
                         print(f"      Implementations: {', '.join(sorted(impls))}")
                 
