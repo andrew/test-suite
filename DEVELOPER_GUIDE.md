@@ -223,6 +223,8 @@ swhid-harness --help  # Full help
 
 ### Viewing Results
 
+The harness provides multiple ways to view and analyze test results, from JSON inspection to HTML table generation. The table generator supports both single-table mode (backward compatible) and variant-based mode (recommended for v2 and future variants).
+
 ```bash
 # Validate schema
 python3 -m harness.models results.json
@@ -236,14 +238,80 @@ cat results.json | jq '.aggregates.overall.pass_rate'
 # Find failures
 cat results.json | jq '.tests[] | select(.results[] | .status == "FAIL")'
 
-# Generate HTML table with color-coded results
+# Generate HTML table (single table, backward compatible)
 python scripts/view_results.py results.json
 python scripts/view_results.py results.json --output custom.html
 ```
 
-#### HTML Results Viewer
+#### HTML Results Tables
 
-The `scripts/view_results.py` script generates a color-coded HTML table from test results:
+The `scripts/view_results.py` script generates color-coded HTML tables from test results. It supports two modes:
+
+- **Single Table Mode**: Generates one table with all results (backward compatible)
+- **Variant-Based Tables**: Generates separate tables for each SWHID variant (recommended for v2)
+
+##### Single Table Mode
+
+Generate a single HTML table with all test results:
+
+```bash
+# Generate single table (default)
+python scripts/view_results.py results.json
+
+# Generate single table with custom output file
+python scripts/view_results.py results.json --output custom.html
+```
+
+This mode is backward compatible and works well when all results use the same SWHID variant (e.g., v1 only).
+
+##### Variant-Based Tables
+
+When test results contain multiple SWHID variants (different versions, hash algorithms, or serialization formats), you can generate separate tables for each variant:
+
+```bash
+# Automatically detects and generates tables for all variants
+python scripts/view_results.py results.json --output-dir output/
+```
+
+This creates:
+- `output/results_index.html` - Navigation page with variant statistics
+- `output/results_v1_sha1_hex.html` - V1 (SHA1 hex) results
+- `output/results_v2_sha256_hex.html` - V2 (SHA256 hex) results
+- Additional tables for any other detected variants (e.g., `v2_sha256_base64.html`)
+
+**Generate Specific Variant**:
+
+```bash
+# Generate only v2 table
+python scripts/view_results.py results.json --output-dir output/ --variant v2_sha256_hex
+```
+
+**Variant Detection**:
+
+The system automatically detects variants from SWHID format using two methods:
+
+1. **Hash Length Analysis**: Different serialization formats produce different hash lengths:
+   - SHA256 hex: 64 characters (32 bytes × 2)
+   - SHA256 base64: 44 characters (32 bytes × 4/3, with padding)
+   - SHA256 base85: 40 characters (32 bytes × 5/4)
+   - SHA256 base32: 52 characters (32 bytes × 8/5)
+
+2. **Character Set Detection**: Each serialization format uses a distinct character set:
+   - Hex: `[0-9a-f]` only
+   - Base64: `[A-Za-z0-9+/=]` (includes padding `=`)
+   - Base85: `[!-u]` (ASCII85 character range)
+   - Base32: `[A-Z2-7=]` (no lowercase, no 0/1/8/9)
+
+Examples:
+- `swh:1:cnt:e69de29bb2d1d6434b8b29ae775ad8c2e48c5391` → v1_sha1_hex (40 chars, hex)
+- `swh:2:cnt:473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813` → v2_sha256_hex (64 chars, hex)
+- `swh:2:cnt:RzoPxMO+iZNhombjse6n3N2hGFQ2/hQfd0kSCjA3IYM=` → v2_sha256_base64 (44 chars, base64)
+
+The combination of length and character set ensures accurate detection even for future serialization formats.
+
+##### Table Features
+
+Both single-table and variant-based modes share the same color-coding system:
 
 - **Color-coded cells**: Each cell uses a background color to indicate status:
   - Green: Conformant (PASS with matching expected SWHID)
@@ -254,11 +322,13 @@ The `scripts/view_results.py` script generates a color-coded HTML table from tes
 - **Compact design**: Cells are color-only (no text labels) except for non-conformant cases which show the full wrong SWHID
 - **Tooltips**: Hover over any cell to see full details (status, SWHID, expected value, errors)
 - **Legend**: Color code explanation at the top of the page
+- **Variant-specific expected values**: Variant-based tables automatically use the correct expected SWHID for each variant (e.g., `expected_swhid_sha256` for v2)
 
-The HTML table makes it easy to:
+The HTML tables make it easy to:
 - Quickly identify which implementations disagree
 - See the exact wrong SWHIDs for non-conformant cases
 - Compare results across all implementations at a glance
+- Compare results across different SWHID variants
 - Share results with others (HTML is self-contained)
 
 ## Troubleshooting
