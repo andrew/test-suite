@@ -710,24 +710,33 @@ class SwhidHarness:
                 expected_swhid_sha256 = payload.get("expected_swhid_sha256")
                 
                 # Determine which version(s) to test
-                # Check for rust_config in payload (per-payload config)
+                # Priority: CLI flags > payload rust_config > expected values presence
                 rust_config = payload.get("rust_config", {})
                 payload_version = rust_config.get("version")
                 payload_hash = rust_config.get("hash")
                 
-                # Determine versions to test
-                # If expected_swhid_sha256 exists, we should test v2
-                # If rust_config specifies version 2, test v2
-                # Otherwise, test v1 (default)
-                test_versions = []
-                if expected_swhid_sha256 or payload_version == 2:
-                    test_versions.append(2)
-                if expected_swhid or payload_version != 2:
-                    test_versions.append(1)
-                
-                # If no explicit version config, default to v1 only
-                if not test_versions:
-                    test_versions = [1]
+                # CLI flags override config
+                if version is not None:
+                    # CLI version specified - use it
+                    test_versions = [version]
+                    test_hash = hash_algo or (payload_hash if version == 2 else None)
+                elif test_both_versions and expected_swhid and expected_swhid_sha256:
+                    # Test both versions if both expected values present and flag set
+                    test_versions = [1, 2]
+                    test_hash = hash_algo or payload_hash or "sha256"
+                else:
+                    # Determine from config/expected values
+                    test_versions = []
+                    if expected_swhid_sha256 or payload_version == 2:
+                        test_versions.append(2)
+                    if expected_swhid or payload_version != 2:
+                        test_versions.append(1)
+                    
+                    # If no explicit version config, default to v1 only
+                    if not test_versions:
+                        test_versions = [1]
+                    
+                    test_hash = hash_algo or payload_hash
                 
                 # Ensure git payloads exist by creating synthetic repos on-the-fly
                 # For synthetic repos, always recreate to ensure consistency
@@ -824,9 +833,9 @@ class SwhidHarness:
                     for impl in self.implementations.values():
                         for test_version in test_versions:
                             # Determine hash algorithm for this version
-                            test_hash = None
+                            version_hash = None
                             if test_version == 2:
-                                test_hash = payload_hash or "sha256"
+                                version_hash = test_hash or "sha256"
                             
                             future = executor.submit(
                                 self._run_single_test,
@@ -837,7 +846,7 @@ class SwhidHarness:
                                 commit=commit,
                                 tag=tag,
                                 version=test_version,
-                                hash_algo=test_hash
+                                hash_algo=version_hash
                             )
                             futures.append((future, impl, test_version))
                     
@@ -1629,6 +1638,14 @@ def main():
     parser.add_argument("--deep", action="store_true",
                        help="Run deep test suite including property-based tests")
     
+    # SWHID v2/SHA256 support
+    parser.add_argument("--version", type=int, choices=[1, 2],
+                       help="SWHID version to use (1 for v1/SHA1, 2 for v2/SHA256). Overrides config.")
+    parser.add_argument("--hash", choices=["sha1", "sha256"],
+                       help="Hash algorithm to use (sha1 for v1, sha256 for v2). Overrides config.")
+    parser.add_argument("--test-both-versions", action="store_true",
+                       help="Run both v1 and v2 tests when both expected values are present")
+    
     args = parser.parse_args()
     
     harness = SwhidHarness(args.config)
@@ -1693,7 +1710,14 @@ def main():
             else:
                 payload_list = args.payload
         
-        results = harness.run_tests(impl_list, category_list, payload_list)
+        results = harness.run_tests(
+            implementations=impl_list,
+            categories=category_list,
+            payloads=payload_list,
+            version=args.version,
+            hash_algo=args.hash,
+            test_both_versions=args.test_both_versions
+        )
         
         # Check for failures if fail-fast
         if args.fail_fast:
