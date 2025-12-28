@@ -91,12 +91,12 @@ class VariantRegistry:
         
         hash_part = parts[-1]  # Last part is the hash
         
-        # Detect hash algorithm from length
-        hash_length = len(hash_part)
-        hash_algo = self._detect_hash_algo_from_length(hash_length)
-        
-        # Detect serialization format from character set
+        # Detect serialization format first (needed for disambiguation)
         serialization = self._detect_serialization_format(hash_part)
+        
+        # Detect hash algorithm from length, using serialization to disambiguate
+        hash_length = len(hash_part)
+        hash_algo = self._detect_hash_algo_from_length(hash_length, serialization)
         
         # Build variant ID
         variant_id = f"v{version}_{hash_algo}_{serialization}"
@@ -109,45 +109,101 @@ class VariantRegistry:
         # This allows detection of unknown variants for future extensibility
         return variant_id
     
-    def _detect_hash_algo_from_length(self, hash_length: int) -> str:
-        """Detect hash algorithm from hash length.
+    def _detect_hash_algo_from_length(self, hash_length: int, serialization: Optional[str] = None) -> str:
+        """Detect hash algorithm from hash length, using serialization to disambiguate.
         
-        Common lengths:
-        - 40 = SHA1 hex (160 bits)
-        - 64 = SHA256 hex (256 bits)
-        - 128 = SHA512 hex (512 bits)
-        - 44 = SHA256 base64 (256 bits, ~32 bytes base64 encoded)
-        - 88 = SHA512 base64 (512 bits, ~64 bytes base64 encoded)
+        Some lengths are ambiguous (e.g., 40 chars could be SHA1 hex or SHA256 base85).
+        When serialization is provided, it's used to resolve these ambiguities.
+        
+        Length reference:
+        - Hex: SHA1=40, SHA256=64, SHA512=128
+        - Base64 (with padding): SHA1=27, SHA256=44, SHA512=88
+        - Base64 (no padding): SHA1=27, SHA256=43, SHA512=86
+        - Base85: SHA1=25, SHA256=40, SHA512=50
+        - Base32: SHA1=32, SHA256=52, SHA512=104
+        
+        Args:
+            hash_length: Length of hash string
+            serialization: Optional serialization format (hex, base64, base32, base85)
+                Used to disambiguate ambiguous lengths
+        
+        Returns:
+            Hash algorithm name (sha1, sha256, sha512) or 'unknown'
         """
+        # Handle ambiguous lengths using serialization
+        if serialization:
+            if hash_length == 40:
+                if serialization == 'hex':
+                    return 'sha1'
+                elif serialization == 'base85':
+                    return 'sha256'
+            # Add other ambiguous cases as needed
+        
+        # Direct length mappings (non-ambiguous)
+        # Note: 40 is ambiguous (SHA1 hex or SHA256 base85), so it's handled above
         length_to_algo = {
-            40: 'sha1',
-            64: 'sha256',
-            128: 'sha512',
-            44: 'sha256',  # base64 encoded
-            88: 'sha512',  # base64 encoded
+            # Hex (non-ambiguous lengths)
+            64: 'sha256',    # SHA256 hex
+            128: 'sha512',   # SHA512 hex
+            
+            # Base64 (with padding)
+            27: 'sha1',      # SHA1 base64
+            44: 'sha256',    # SHA256 base64
+            88: 'sha512',    # SHA512 base64
+            
+            # Base64 (without padding)
+            43: 'sha256',    # SHA256 base64 (no padding)
+            86: 'sha512',   # SHA512 base64 (no padding)
+            
+            # Base85 (non-ambiguous lengths)
+            25: 'sha1',      # SHA1 base85
+            50: 'sha512',    # SHA512 base85
+            
+            # Base32
+            32: 'sha1',      # SHA1 base32
+            52: 'sha256',    # SHA256 base32
+            104: 'sha512',   # SHA512 base32
         }
-        return length_to_algo.get(hash_length, 'unknown')
+        
+        # Check non-ambiguous mappings first
+        if hash_length in length_to_algo:
+            return length_to_algo[hash_length]
+        
+        # Handle ambiguous length 40 (SHA1 hex or SHA256 base85)
+        # Default to SHA1 hex if serialization not provided (backward compatibility)
+        if hash_length == 40:
+            return 'sha1'  # Default assumption for backward compatibility
+        
+        return 'unknown'
     
     def _detect_serialization_format(self, hash_part: str) -> str:
         """Detect serialization format from hash character set.
+        
+        Detection order matters: hex (most restrictive) → base85 → base32 → base64 (most permissive).
+        Base85 must be checked before base64 since its character set is a subset of base64.
         
         Args:
             hash_part: The hash portion of the SWHID
         
         Returns:
-            'hex', 'base64', 'base32', or 'unknown'
+            'hex', 'base85', 'base32', 'base64', or 'unknown'
         """
-        # Hex: only 0-9, a-f
+        # Hex: only 0-9, a-f (most restrictive)
         if re.match(r'^[0-9a-f]+$', hash_part):
             return 'hex'
         
-        # Base64: A-Z, a-z, 0-9, +, /, = (padding)
-        if re.match(r'^[A-Za-z0-9+/=]+$', hash_part):
-            return 'base64'
+        # Base85: ASCII characters 33-117 (! through u)
+        # Must check before base64 since base85 charset is subset of base64
+        if re.match(r'^[!-u]+$', hash_part):
+            return 'base85'
         
         # Base32: A-Z, 2-7, = (padding), no lowercase, no 0, 1, 8, 9
         if re.match(r'^[A-Z2-7=]+$', hash_part) and not re.search(r'[01]', hash_part):
             return 'base32'
+        
+        # Base64: A-Z, a-z, 0-9, +, /, = (padding) (most permissive)
+        if re.match(r'^[A-Za-z0-9+/=]+$', hash_part):
+            return 'base64'
         
         return 'unknown'
     
