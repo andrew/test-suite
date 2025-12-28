@@ -301,17 +301,30 @@ def get_error_summary(error: Optional[Dict]) -> str:
     return error_message
 
 
-def create_html_table(results_data: Dict) -> str:
-    """Create an HTML table with color-coded results."""
+def create_html_table(results_data: Dict, variant_config: Optional[Dict] = None) -> str:
+    """Create an HTML table with color-coded results.
+    
+    Args:
+        results_data: Results dictionary with tests and implementations
+        variant_config: Optional variant configuration dict for variant-specific display
+    """
     implementations = sorted([impl['id'] for impl in results_data.get('implementations', [])])
     tests = results_data.get('tests', [])
     
     if not implementations or not tests:
         return "<p>No data to display</p>"
     
+    # Determine variant info for title
+    if variant_config:
+        variant_title = f"v{variant_config['version']} {variant_config['hash_algo'].upper()} {variant_config['serialization']}"
+        page_title = f"SWHID Test Results - {variant_title}"
+    else:
+        page_title = "SWHID Test Results"
+        variant_title = None
+    
     # Start HTML
     html = ['<!DOCTYPE html>', '<html>', '<head>', '<meta charset="UTF-8">']
-    html.append('<title>SWHID Test Results</title>')
+    html.append(f'<title>{escape(page_title)}</title>')
     html.append('<style>')
     html.append('''
         body {
@@ -402,7 +415,11 @@ def create_html_table(results_data: Dict) -> str:
     html.append('</style>')
     html.append('</head>')
     html.append('<body>')
-    html.append('<h1>SWHID Test Results</h1>')
+    html.append(f'<h1>{escape(page_title)}</h1>')
+    
+    # Add variant info if available
+    if variant_title:
+        html.append(f'<p><strong>Variant:</strong> {escape(variant_title)}</p>')
     
     # Add legend
     html.append('<div class="legend">')
