@@ -214,7 +214,8 @@ class SwhidHarness:
     
     def _run_single_test(self, implementation: SwhidImplementation, payload_path: str, 
                          payload_name: str, category: Optional[str] = None, 
-                         commit: Optional[str] = None, tag: Optional[str] = None) -> SwhidTestResult:
+                         commit: Optional[str] = None, tag: Optional[str] = None,
+                         version: Optional[int] = None, hash_algo: Optional[str] = None) -> SwhidTestResult:
         """Run a single test for one implementation."""
         start_time = time.time()
         
@@ -259,7 +260,8 @@ class SwhidHarness:
                     swhid=None,
                     error=f"Object type '{obj_type}' (SWHID code '{swhid_code}') not supported by implementation",
                     duration=0.0,
-                    success=False
+                    success=False,
+                    version=version if version is not None else 1
                 )
             
             # Resolve commit reference to full SHA if needed (for branch names, tags, short SHAs)
@@ -270,8 +272,26 @@ class SwhidHarness:
             
             # For revision/release, pass commit/tag information to implementations
             # Use resolved commit (full SHA) instead of original commit reference
-            swhid = implementation.compute_swhid(actual_payload_path, obj_type, commit=resolved_commit, tag=tag)
+            # Pass version/hash config if provided
+            compute_kwargs = {"commit": resolved_commit, "tag": tag}
+            if version is not None:
+                compute_kwargs["version"] = version
+            if hash_algo is not None:
+                compute_kwargs["hash_algo"] = hash_algo
+            
+            swhid = implementation.compute_swhid(actual_payload_path, obj_type, **compute_kwargs)
             duration = time.time() - start_time
+            
+            # Determine SWHID version from result
+            # Priority: explicit version parameter > SWHID string detection > default to 1
+            if version is not None:
+                result_version = version
+            elif swhid and swhid.startswith("swh:2:"):
+                result_version = 2
+            elif swhid and swhid.startswith("swh:1:"):
+                result_version = 1
+            else:
+                result_version = 1  # Default fallback
             
             return SwhidTestResult(
                 payload_name=payload_name,
@@ -280,7 +300,8 @@ class SwhidHarness:
                 swhid=swhid,
                 error=None,
                 duration=duration,
-                success=True
+                success=True,
+                version=result_version
             )
             
         except Exception as e:
@@ -299,7 +320,8 @@ class SwhidHarness:
                     swhid=None,
                     error=f"Object type not supported: {error_str}",
                     duration=0.0,
-                    success=False
+                    success=False,
+                    version=version if version is not None else 1
                 )
             return SwhidTestResult(
                 payload_name=payload_name,
@@ -308,7 +330,8 @@ class SwhidHarness:
                 swhid=None,
                 error=error_str,
                 duration=duration,
-                success=False
+                success=False,
+                version=version if version is not None else 1
             )
     
     def _discover_git_tests(self, repo_path: str, base_name: str, 
@@ -373,7 +396,7 @@ class SwhidHarness:
                     
                     # Compare results (no expected SWHID for discovered tests)
                     expected_swhid = expected_branches.get(branch)
-                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=expected_swhid)
+                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=expected_swhid, expected_swhid_sha256=None)
                     all_results.append(comparison)
                     
                     # Log results similar to regular tests
@@ -491,7 +514,7 @@ class SwhidHarness:
                     
                     # Compare results (no expected SWHID for discovered tests)
                     expected_swhid = expected_tags.get(tag)
-                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=expected_swhid)
+                    comparison = self._compare_results(test_name, actual_repo_path, results, expected_swhid=expected_swhid, expected_swhid_sha256=None)
                     all_results.append(comparison)
                     
                     # Log results similar to regular tests
@@ -567,6 +590,7 @@ class SwhidHarness:
     def _compare_results(self, payload_name: str, payload_path: str,
                         results: Dict[str, SwhidTestResult], 
                         expected_swhid: Optional[str] = None,
+                        expected_swhid_sha256: Optional[str] = None,
                         expected_error: Optional[str] = None) -> ComparisonResult:
         """Compare results across implementations."""
         supported_results = {
@@ -597,7 +621,8 @@ class SwhidHarness:
                     payload_path=payload_path,
                     results=results,
                     all_match=True,
-                    expected_swhid=expected_swhid
+                    expected_swhid=expected_swhid,
+                    expected_swhid_sha256=expected_swhid_sha256
                 )
         
         # Check if all implementations succeeded
@@ -609,25 +634,36 @@ class SwhidHarness:
                 payload_path=payload_path,
                 results=results,
                 all_match=False,
-                expected_swhid=expected_swhid
+                expected_swhid=expected_swhid,
+                expected_swhid_sha256=expected_swhid_sha256
             )
         
-        # Get all SWHIDs
-        swhids = [r.swhid for r in supported_results.values() if r.swhid]
+        # Get all SWHIDs, grouped by version
+        v1_swhids = [r.swhid for r in supported_results.values() 
+                     if r.swhid and r.version == 1]
+        v2_swhids = [r.swhid for r in supported_results.values() 
+                     if r.swhid and r.version == 2]
         
-        # Check if all SWHIDs match
-        all_match = len(set(swhids)) == 1 if swhids else False
+        # Check if all SWHIDs match within each version group
+        v1_match = len(set(v1_swhids)) == 1 if v1_swhids else True  # True if no v1 results
+        v2_match = len(set(v2_swhids)) == 1 if v2_swhids else True  # True if no v2 results
         
-        # Check against expected SWHID if provided
-        if expected_swhid and all_match:
-            all_match = swhids[0] == expected_swhid
+        all_match = v1_match and v2_match
+        
+        # Check against expected SWHIDs if provided
+        if all_match:
+            if v1_swhids and expected_swhid:
+                all_match = v1_swhids[0] == expected_swhid
+            if v2_swhids and expected_swhid_sha256:
+                all_match = all_match and (v2_swhids[0] == expected_swhid_sha256)
         
         return ComparisonResult(
             payload_name=payload_name,
             payload_path=payload_path,
             results=results,
             all_match=all_match,
-            expected_swhid=expected_swhid
+            expected_swhid=expected_swhid,
+            expected_swhid_sha256=expected_swhid_sha256
         )
     
     def run_tests(self, implementations: Optional[List[str]] = None,
@@ -671,6 +707,27 @@ class SwhidHarness:
                     payload_path = os.path.join(config_dir, payload_path)
                 payload_name = payload["name"]
                 expected_swhid = payload.get("expected_swhid")
+                expected_swhid_sha256 = payload.get("expected_swhid_sha256")
+                
+                # Determine which version(s) to test
+                # Check for rust_config in payload (per-payload config)
+                rust_config = payload.get("rust_config", {})
+                payload_version = rust_config.get("version")
+                payload_hash = rust_config.get("hash")
+                
+                # Determine versions to test
+                # If expected_swhid_sha256 exists, we should test v2
+                # If rust_config specifies version 2, test v2
+                # Otherwise, test v1 (default)
+                test_versions = []
+                if expected_swhid_sha256 or payload_version == 2:
+                    test_versions.append(2)
+                if expected_swhid or payload_version != 2:
+                    test_versions.append(1)
+                
+                # If no explicit version config, default to v1 only
+                if not test_versions:
+                    test_versions = [1]
                 
                 # Ensure git payloads exist by creating synthetic repos on-the-fly
                 # For synthetic repos, always recreate to ensure consistency
@@ -730,12 +787,14 @@ class SwhidHarness:
                         )
                     # Create comparison result with SKIPPED status
                     expected_error = payload.get("expected_error")
+                    expected_swhid_sha256 = payload.get("expected_swhid_sha256")
                     comparison = ComparisonResult(
                         payload_name=payload_name,
                         payload_path=payload_path,
                         results=skipped_results,
                         all_match=False,  # SKIPPED is not a match
-                        expected_swhid=expected_swhid
+                        expected_swhid=expected_swhid,
+                        expected_swhid_sha256=expected_swhid_sha256
                     )
                     all_results.append(comparison)
                     continue
@@ -758,25 +817,51 @@ class SwhidHarness:
                 commit = payload.get("commit")
                 tag = payload.get("tag")
                 
-                # Run tests for all implementations
+                # Run tests for all implementations and all versions
                 results = {}
                 with ThreadPoolExecutor(max_workers=self.config["settings"]["parallel_tests"]) as executor:
-                    future_to_impl = {
-                        executor.submit(self._run_single_test, impl, payload_path, payload_name, category, commit=commit, tag=tag): impl
-                        for impl in self.implementations.values()
-                    }
+                    futures = []
+                    for impl in self.implementations.values():
+                        for test_version in test_versions:
+                            # Determine hash algorithm for this version
+                            test_hash = None
+                            if test_version == 2:
+                                test_hash = payload_hash or "sha256"
+                            
+                            future = executor.submit(
+                                self._run_single_test,
+                                impl,
+                                payload_path,
+                                payload_name,
+                                category,
+                                commit=commit,
+                                tag=tag,
+                                version=test_version,
+                                hash_algo=test_hash
+                            )
+                            futures.append((future, impl, test_version))
                     
-                    for future in as_completed(future_to_impl):
-                        impl = future_to_impl[future]
+                    for future, impl, test_version in futures:
                         try:
                             result = future.result()
-                            results[impl.get_info().name] = result
+                            # Use a key that includes version to distinguish v1 and v2 results
+                            result_key = f"{impl.get_info().name}"
+                            if len(test_versions) > 1:
+                                result_key = f"{impl.get_info().name}_v{test_version}"
+                            results[result_key] = result
                         except Exception as e:
-                            logger.error(f"Error running test for {impl.get_info().name}: {e}")
+                            logger.error(f"Error running test for {impl.get_info().name} (v{test_version}): {e}")
                 
                 # Compare results
                 expected_error = payload.get("expected_error")
-                comparison = self._compare_results(payload_name, payload_path, results, expected_swhid, expected_error)
+                comparison = self._compare_results(
+                    payload_name,
+                    payload_path,
+                    results,
+                    expected_swhid,
+                    expected_swhid_sha256,
+                    expected_error
+                )
                 all_results.append(comparison)
                 
                 # Log results
