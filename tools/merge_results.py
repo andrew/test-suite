@@ -20,36 +20,77 @@ def load_canonical_results(file_path: str) -> Dict[str, Any]:
     with open(file_path, 'r') as f:
         return json.load(f)
 
+def normalize_platform_name(os_string: str) -> str:
+    """Normalize OS string to a friendly platform name."""
+    os_lower = os_string.lower()
+    if "ubuntu" in os_lower or "linux" in os_lower:
+        return "Ubuntu"
+    elif "macos" in os_lower or "darwin" in os_lower:
+        return "macOS"
+    elif "windows" in os_lower:
+        return "Windows"
+    else:
+        return os_string.split("-")[0] if "-" in os_string else os_string
+
 def create_index_data(results_files: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Create index.json data from multiple results files."""
     runs = []
     total_tests = 0
     total_passed = 0
+    total_failed = 0
+    total_skipped = 0
     implementations = set()
     
     for results in results_files:
+        # Extract platform info
+        runner_info = results.get("run", {}).get("runner", {})
+        platform_name = normalize_platform_name(runner_info.get("os", "Unknown"))
+        
         run_data = {
             "id": results["run"]["id"],
             "created_at": results["run"]["created_at"],
             "branch": results["run"]["branch"],
             "commit": results["run"]["commit"],
-            "pass_rate": 0.0
+            "platform": platform_name,
+            "pass_rate": 0.0,
+            "passed": 0,
+            "failed": 0,
+            "skipped": 0,
+            "total": 0
         }
         
-        # Calculate pass rate
+        # Calculate pass/fail/skip counts
         test_count = len(results["tests"])
         passed_count = 0
+        failed_count = 0
+        skipped_count = 0
+        
         for test in results["tests"]:
             for result in test["results"]:
                 if result["status"] == "PASS":
                     passed_count += 1
+                elif result["status"] == "FAIL":
+                    failed_count += 1
+                elif result["status"] == "SKIP":
+                    skipped_count += 1
         
-        if test_count > 0:
-            run_data["pass_rate"] = round(passed_count / (test_count * len(results["implementations"])) * 100, 2)
+        total_result_count = test_count * len(results["implementations"])
+        
+        if total_result_count > 0:
+            run_data["pass_rate"] = round(passed_count / total_result_count * 100, 2)
+            run_data["failed_rate"] = round(failed_count / total_result_count * 100, 2)
+            run_data["skipped_rate"] = round(skipped_count / total_result_count * 100, 2)
+        
+        run_data["passed"] = passed_count
+        run_data["failed"] = failed_count
+        run_data["skipped"] = skipped_count
+        run_data["total"] = total_result_count
         
         runs.append(run_data)
         total_tests += test_count
         total_passed += passed_count
+        total_failed += failed_count
+        total_skipped += skipped_count
         
         # Collect implementations
         for impl in results["implementations"]:
@@ -58,12 +99,40 @@ def create_index_data(results_files: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Sort runs by created_at (newest first)
     runs.sort(key=lambda x: x["created_at"], reverse=True)
     
+    # Group runs by platform for aggregation
+    platform_stats = {}
+    for run in runs:
+        platform = run["platform"]
+        if platform not in platform_stats:
+            platform_stats[platform] = {
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "skipped": 0
+            }
+        platform_stats[platform]["total"] += run["total"]
+        platform_stats[platform]["passed"] += run["passed"]
+        platform_stats[platform]["failed"] += run["failed"]
+        platform_stats[platform]["skipped"] += run["skipped"]
+    
+    # Calculate per-platform rates
+    for platform, stats in platform_stats.items():
+        if stats["total"] > 0:
+            stats["pass_rate"] = round(stats["passed"] / stats["total"] * 100, 2)
+            stats["fail_rate"] = round(stats["failed"] / stats["total"] * 100, 2)
+            stats["skip_rate"] = round(stats["skipped"] / stats["total"] * 100, 2)
+        else:
+            stats["pass_rate"] = 0.0
+            stats["fail_rate"] = 0.0
+            stats["skip_rate"] = 0.0
+    
     return {
         "last_updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total_runs": len(runs),
         "total_tests": total_tests,
         "overall_pass_rate": round(total_passed / (total_tests * len(implementations)) * 100, 2) if total_tests > 0 else 0,
         "implementations": sorted(list(implementations)),
+        "platform_stats": platform_stats,
         "runs": runs
     }
 

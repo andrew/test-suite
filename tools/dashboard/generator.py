@@ -103,19 +103,53 @@ class DashboardGenerator:
             run_pass_class = 'success' if run['pass_rate'] >= 80 else 'warning' if run['pass_rate'] >= 50 else 'danger'
             commit_short = run['commit'][:7] if run['commit'] != 'unknown' else 'unknown'
             created_at = run['created_at'][:19] if len(run['created_at']) > 19 else run['created_at']
+            
+            # Get platform name (default to "Unknown" for backward compatibility)
+            platform = run.get('platform', 'Unknown')
+            
+            # Get per-platform stats
+            passed = run.get('passed', 0)
+            failed = run.get('failed', 0)
+            skipped = run.get('skipped', 0)
+            total = run.get('total', 0)
+            
+            # Calculate rates
+            pass_rate = run.get('pass_rate', 0.0)
+            fail_rate = run.get('failed_rate', 0.0)
+            skip_rate = run.get('skipped_rate', 0.0)
+            
+            # Format platform breakdown
+            if total > 0:
+                platform_breakdown = f"""
+                        <div class="platform-stats">
+                            <span class="stat-pass">✓ {pass_rate:.1f}%</span>
+                            <span class="stat-fail">✗ {fail_rate:.1f}%</span>
+                            <span class="stat-skip">⊘ {skip_rate:.1f}%</span>
+                        </div>
+                        <div class="platform-counts">
+                            <small>({passed}/{total} pass, {failed} fail, {skipped} skip)</small>
+                        </div>
+                    """
+            else:
+                platform_breakdown = '<span class="text-muted">No data</span>'
+            
             runs_rows.append(f"""
                 <tr>
                     <td><code>{run['id']}</code></td>
                     <td>{run['branch']}</td>
                     <td><code>{commit_short}</code></td>
-                    <td><span class="badge badge-{run_pass_class}">{run['pass_rate']}%</span></td>
+                    <td><strong>{platform}</strong></td>
+                    <td>
+                        <span class="badge badge-{run_pass_class}">{run['pass_rate']:.1f}%</span>
+                        {platform_breakdown}
+                    </td>
                     <td>{created_at}</td>
                     <td>
                         <a href="data/runs/{run['id']}.json">JSON</a>
                     </td>
                 </tr>
             """)
-        context['runs_rows'] = '\n'.join(runs_rows) if runs_rows else '<tr><td colspan="6">No runs available</td></tr>'
+        context['runs_rows'] = '\n'.join(runs_rows) if runs_rows else '<tr><td colspan="7">No runs available</td></tr>'
         
         # Generate artifact HTML section
         if artifact_files:
