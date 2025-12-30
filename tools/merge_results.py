@@ -71,7 +71,7 @@ def create_index_data(results_files: List[Dict[str, Any]]) -> Dict[str, Any]:
                     passed_count += 1
                 elif result["status"] == "FAIL":
                     failed_count += 1
-                elif result["status"] == "SKIP":
+                elif result["status"] == "SKIPPED":
                     skipped_count += 1
         
         total_result_count = test_count * len(results["implementations"])
