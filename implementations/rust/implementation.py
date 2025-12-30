@@ -24,6 +24,7 @@ class Implementation(SwhidImplementation):
         self._default_build_ready = False
         self._binary_path_cache: Optional[str] = None
         self._temp_dirs: list = []  # Track temp directories for cleanup
+        self._content_command_format: Optional[str] = None  # Cache detected format: "positional" or "file_flag"
     
     def get_info(self) -> ImplementationInfo:
         """Return implementation metadata."""
@@ -161,8 +162,18 @@ class Implementation(SwhidImplementation):
         cmd = [binary_path]
         
         if obj_type == "content":
-            # For content: swhid content --file <path>
-            cmd.extend(["content", "--file", payload_path])
+            # Try both formats to support both experimental and published versions
+            # First try experimental format (positional), then fall back to published (--file)
+            result_swhid = self._try_content_command(binary_path, payload_path, version, hash_algo)
+            if result_swhid:
+                return result_swhid
+            
+            # If both formats failed, build command with detected format and let error propagate
+            content_format = self._detect_content_command_format(binary_path)
+            if content_format == "file_flag":
+                cmd.extend(["content", "--file", payload_path])
+            else:
+                cmd.extend(["content", payload_path])
         elif obj_type == "directory":
             # For directory: swhid dir <path>
             # On Windows, we need to preserve file permissions before calling the tool
@@ -221,6 +232,53 @@ class Implementation(SwhidImplementation):
             
             if result.returncode != 0:
                 error_msg = result.stderr.strip() or result.stdout.strip()
+                
+                # If content command failed, try the other format
+                if obj_type == "content":
+                    # Toggle format and try again
+                    if self._content_command_format == "positional":
+                        # Try with --file flag
+                        alt_cmd = [binary_path]
+                        if version == 2:
+                            alt_cmd.extend(["--version", "2"])
+                        if hash_algo == "sha256":
+                            alt_cmd.extend(["--hash", "sha256"])
+                        alt_cmd.extend(["content", "--file", payload_path])
+                        
+                        alt_result = subprocess.run(
+                            alt_cmd,
+                            capture_output=True,
+                            text=True,
+                            cwd=project_root,
+                            timeout=60
+                        )
+                        if alt_result.returncode == 0:
+                            self._content_command_format = "file_flag"
+                            output = alt_result.stdout.strip()
+                            if output and output.startswith("swh:"):
+                                return output.split('\n')[0].strip()
+                    else:
+                        # Try with positional argument
+                        alt_cmd = [binary_path]
+                        if version == 2:
+                            alt_cmd.extend(["--version", "2"])
+                        if hash_algo == "sha256":
+                            alt_cmd.extend(["--hash", "sha256"])
+                        alt_cmd.extend(["content", payload_path])
+                        
+                        alt_result = subprocess.run(
+                            alt_cmd,
+                            capture_output=True,
+                            text=True,
+                            cwd=project_root,
+                            timeout=60
+                        )
+                        if alt_result.returncode == 0:
+                            self._content_command_format = "positional"
+                            output = alt_result.stdout.strip()
+                            if output and output.startswith("swh:"):
+                                return output.split('\n')[0].strip()
+                
                 raise RuntimeError(f"Rust implementation failed: {error_msg}")
             
             # Parse the output - should be just the SWHID
@@ -415,6 +473,118 @@ class Implementation(SwhidImplementation):
                     pass
             
             return temp_path
+    
+    def _detect_content_command_format(self, binary_path: str) -> str:
+        """Detect which command format the swhid binary supports for content.
+        
+        Returns:
+            "positional" for experimental version (swhid content <path>)
+            "file_flag" for published version (swhid content --file <path>)
+        """
+        # Use cached result if available
+        if self._content_command_format is not None:
+            return self._content_command_format
+        
+        # Try to detect by checking help output or trying a test command
+        # First, try checking help for content command
+        try:
+            result = subprocess.run(
+                [binary_path, "content", "--help"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # If --help works, check if --file is mentioned in help
+            if result.returncode == 0 and "--file" in result.stdout:
+                self._content_command_format = "file_flag"
+                logger.debug("Detected published version (--file flag supported)")
+                return self._content_command_format
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+        
+        # If help check didn't work, try the experimental format first
+        # (since that's what we're moving towards)
+        # We'll fall back to --file format if positional fails during actual execution
+        # For now, default to experimental (positional) format
+        self._content_command_format = "positional"
+        logger.debug("Defaulting to experimental version (positional argument)")
+        return self._content_command_format
+    
+    def _try_content_command(self, binary_path: str, payload_path: str, 
+                            version: Optional[int], hash_algo: Optional[str]) -> Optional[str]:
+        """Try to execute content command and return SWHID if successful, None if format wrong.
+        
+        Uses cached format if available, otherwise tries both formats to detect the correct one.
+        """
+        cmd = [binary_path]
+        
+        # Add version/hash flags if specified
+        if version == 2:
+            cmd.extend(["--version", "2"])
+        if hash_algo == "sha256":
+            cmd.extend(["--hash", "sha256"])
+        
+        # If we have a cached format, try that first
+        if self._content_command_format == "file_flag":
+            # Try published format first (--file flag)
+            test_cmd = cmd + ["content", "--file", payload_path]
+            try:
+                result = subprocess.run(
+                    test_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+                    if output and output.startswith("swh:"):
+                        return output.split('\n')[0].strip()
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+                pass
+            # If cached format failed, try the other one
+            self._content_command_format = None
+        
+        # Try experimental format (positional argument) - either first time or as fallback
+        test_cmd = cmd + ["content", payload_path]
+        try:
+            result = subprocess.run(
+                test_cmd,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if output and output.startswith("swh:"):
+                    # Success with experimental format
+                    if self._content_command_format != "positional":
+                        self._content_command_format = "positional"
+                        logger.debug("Detected experimental version (positional argument works)")
+                    return output.split('\n')[0].strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+        
+        # If experimental format failed and we don't have a cached format, try published format
+        if self._content_command_format is None:
+            test_cmd = cmd + ["content", "--file", payload_path]
+            try:
+                result = subprocess.run(
+                    test_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+                    if output and output.startswith("swh:"):
+                        # Success with published format
+                        self._content_command_format = "file_flag"
+                        logger.debug("Detected published version (--file flag works)")
+                        return output.split('\n')[0].strip()
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+                pass
+        
+        return None
     
     def _get_project_root(self) -> Optional[str]:
         """
