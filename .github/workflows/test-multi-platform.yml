@@ -24,28 +24,18 @@ jobs:
         with:
           python-version: 3.12
       
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
-      
       - name: Install Software Heritage Python tools
         shell: bash
         run: |
+          python -m pip install --upgrade pip
           pip install swh.model swh.core || echo "Warning: swh Python tools not available"
         continue-on-error: true
       
-      - name: Set up Ruby
+      - name: Set up Ruby (for version checking)
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
           bundler-cache: false
-        continue-on-error: true
-      
-      - name: Install swhid gem
-        shell: bash
-        run: |
-          gem install swhid || echo "Warning: swhid gem not available, Ruby implementation will be skipped"
         continue-on-error: true
       
       - name: Find previous workflow run
@@ -131,6 +121,7 @@ jobs:
           CURRENT_TEST_SUITE_SHA=$(git rev-parse HEAD)
           CURRENT_SWH_MODEL_VERSION=""
           CURRENT_SWH_CORE_VERSION=""
+          CURRENT_SWHID_GEM_VERSION=""
           
           # Check changes in test-suite repository
           echo "### Test Suite Repository" >> $GITHUB_STEP_SUMMARY
@@ -188,6 +179,40 @@ jobs:
           done
           echo "" >> $GITHUB_STEP_SUMMARY
           
+          # Check for updates in Ruby gem
+          echo "### Ruby Gem (swhid)" >> $GITHUB_STEP_SUMMARY
+          if command -v gem >/dev/null 2>&1; then
+            # Get latest version from RubyGems without installing
+            # gem search -r swhid outputs: "swhid (X.Y.Z)" or "swhid (X.Y.Z, X.Y.Z-1, ...)"
+            GEM_SEARCH_OUTPUT=$(gem search -r -e swhid 2>/dev/null | grep -E "^swhid\s" | head -1 || echo "")
+            if [ -n "$GEM_SEARCH_OUTPUT" ]; then
+              # Extract version: "swhid (1.2.3)" -> "1.2.3"
+              LATEST_GEM_VERSION=$(echo "$GEM_SEARCH_OUTPUT" | sed -E 's/^swhid\s+\(([^,)]+).*\)$/\1/' | xargs)
+              if [ -n "$LATEST_GEM_VERSION" ]; then
+                CURRENT_SWHID_GEM_VERSION="$LATEST_GEM_VERSION"
+                if [ -f previous-state/swhid-gem-version.txt ]; then
+                  PREVIOUS_VERSION=$(cat previous-state/swhid-gem-version.txt)
+                  if [ "$LATEST_GEM_VERSION" != "$PREVIOUS_VERSION" ]; then
+                    echo "⚠️ **swhid gem**: Previous: \`$PREVIOUS_VERSION\` → Current: \`$LATEST_GEM_VERSION\`" >> $GITHUB_STEP_SUMMARY
+                    CHANGES_DETECTED=true
+                  else
+                    echo "✅ **swhid gem**: \`$LATEST_GEM_VERSION\` (unchanged)" >> $GITHUB_STEP_SUMMARY
+                  fi
+                else
+                  echo "ℹ️ **swhid gem**: \`$LATEST_GEM_VERSION\` (first check)" >> $GITHUB_STEP_SUMMARY
+                  CHANGES_DETECTED=true
+                fi
+              else
+                echo "ℹ️ **swhid gem**: Could not parse version from: $GEM_SEARCH_OUTPUT" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "ℹ️ **swhid gem**: Could not find gem in RubyGems" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "ℹ️ **swhid gem**: Ruby/gem not available for version checking" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           # Summary
           if [ "$CHANGES_DETECTED" = "true" ]; then
             echo "### 📊 Summary" >> $GITHUB_STEP_SUMMARY
@@ -207,6 +232,9 @@ jobs:
           fi
           if [ -n "$CURRENT_SWH_CORE_VERSION" ]; then
             echo "$CURRENT_SWH_CORE_VERSION" > current-state/swh.core-version.txt
+          fi
+          if [ -n "$CURRENT_SWHID_GEM_VERSION" ]; then
+            echo "$CURRENT_SWHID_GEM_VERSION" > current-state/swhid-gem-version.txt
           fi
         continue-on-error: true
       
