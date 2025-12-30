@@ -88,6 +88,27 @@ nav a:hover {
 .stat-value.warning { color: var(--warning-color); }
 .stat-value.danger { color: var(--danger-color); }
 
+.stat-details {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 0.85em;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.stat-details .detail-pass {
+    color: var(--success-color);
+}
+
+.stat-details .detail-fail {
+    color: var(--danger-color);
+}
+
+.stat-details .detail-skip {
+    color: var(--warning-color);
+}
+
 .implementations {
     margin-top: 15px;
     padding: 10px;
@@ -212,5 +233,90 @@ footer {
 .text-muted {
     color: #586069;
     font-style: italic;
+}
+
+/* Platform breakdown in summary */
+.platform-breakdown {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.platform-breakdown h3 {
+    margin: 0 0 15px 0;
+    color: #24292e;
+    font-size: 1.2em;
+}
+
+.platform-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.platform-card {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 15px;
+}
+
+.platform-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.platform-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: #24292e;
+}
+
+.platform-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.platform-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.platform-stat .stat-label {
+    font-size: 0.9em;
+    color: #586069;
+    flex: 1;
+}
+
+.platform-stat .stat-value {
+    font-weight: 600;
+    font-size: 0.95em;
+    margin: 0 8px;
+}
+
+.platform-stat .stat-value.stat-pass {
+    color: var(--success-color);
+}
+
+.platform-stat .stat-value.stat-fail {
+    color: var(--danger-color);
+}
+
+.platform-stat .stat-value.stat-skip {
+    color: var(--warning-color);
+}
+
+.platform-stat .stat-count {
+    font-size: 0.85em;
+    color: #586069;
+    font-family: monospace;
 }
 

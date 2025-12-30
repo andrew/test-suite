@@ -126,11 +126,21 @@ def create_index_data(results_files: List[Dict[str, Any]]) -> Dict[str, Any]:
             stats["fail_rate"] = 0.0
             stats["skip_rate"] = 0.0
     
+    total_results = total_tests * len(implementations) if implementations else 0
+    overall_fail_rate = round(total_failed / total_results * 100, 2) if total_results > 0 else 0
+    overall_skip_rate = round(total_skipped / total_results * 100, 2) if total_results > 0 else 0
+    
     return {
         "last_updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total_runs": len(runs),
         "total_tests": total_tests,
-        "overall_pass_rate": round(total_passed / (total_tests * len(implementations)) * 100, 2) if total_tests > 0 else 0,
+        "total_results": total_results,
+        "total_passed": total_passed,
+        "total_failed": total_failed,
+        "total_skipped": total_skipped,
+        "overall_pass_rate": round(total_passed / total_results * 100, 2) if total_results > 0 else 0,
+        "overall_fail_rate": overall_fail_rate,
+        "overall_skip_rate": overall_skip_rate,
         "implementations": sorted(list(implementations)),
         "platform_stats": platform_stats,
         "runs": runs

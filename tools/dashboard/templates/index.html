@@ -11,12 +11,24 @@
                 <span class="stat-value">${total_tests}</span>
             </div>
             <div class="stat">
-                <span class="stat-label">Pass Rate</span>
+                <span class="stat-label">Overall Pass Rate</span>
                 <span class="stat-value ${pass_rate_class}">${overall_pass_rate}%</span>
+                <div class="stat-details">
+                    <span class="detail-pass">✓ ${total_passed}/${total_results}</span>
+                    <span class="detail-fail">✗ ${total_failed}</span>
+                    <span class="detail-skip">⊘ ${total_skipped}</span>
+                </div>
             </div>
         </div>
         <div class="implementations">
             <strong>Implementations:</strong> ${implementations}
+        </div>
+        
+        <div class="platform-breakdown">
+            <h3>Pass Rate by Platform</h3>
+            <div class="platform-cards">
+                ${platform_breakdown}
+            </div>
         </div>
     </section>
     

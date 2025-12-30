@@ -79,13 +79,26 @@ class DashboardGenerator:
         index_template = self._load_template('index.html')
         
         # Prepare context
+        platform_stats = data.get('platform_stats', {})
+        total_results = data.get('total_results', 0)
+        total_passed = data.get('total_passed', 0)
+        total_failed = data.get('total_failed', 0)
+        total_skipped = data.get('total_skipped', 0)
+        
         context = {
             'title': 'Dashboard',
             'total_runs': data.get('total_runs', 0),
             'total_tests': data.get('total_tests', 0),
-            'overall_pass_rate': data.get('overall_pass_rate', 0),
+            'total_results': total_results,
+            'total_passed': total_passed,
+            'total_failed': total_failed,
+            'total_skipped': total_skipped,
+            'overall_pass_rate': round(data.get('overall_pass_rate', 0), 2),
+            'overall_fail_rate': round(data.get('overall_fail_rate', 0), 2),
+            'overall_skip_rate': round(data.get('overall_skip_rate', 0), 2),
             'implementations': ', '.join(data.get('implementations', [])),
             'runs': data.get('runs', []),
+            'platform_stats': platform_stats,
         }
         
         # Determine pass rate class
@@ -96,6 +109,56 @@ class DashboardGenerator:
             context['pass_rate_class'] = 'warning'
         else:
             context['pass_rate_class'] = 'danger'
+        
+        # Generate platform breakdown HTML
+        platform_breakdown_html = []
+        if platform_stats:
+            for platform, stats in sorted(platform_stats.items()):
+                total = stats.get('total', 0)
+                passed = stats.get('passed', 0)
+                failed = stats.get('failed', 0)
+                skipped = stats.get('skipped', 0)
+                pass_rate = stats.get('pass_rate', 0.0)
+                fail_rate = stats.get('fail_rate', 0.0)
+                skip_rate = stats.get('skip_rate', 0.0)
+                
+                # Determine pass rate class for this platform
+                if pass_rate >= 80:
+                    platform_class = 'success'
+                elif pass_rate >= 50:
+                    platform_class = 'warning'
+                else:
+                    platform_class = 'danger'
+                
+                platform_breakdown_html.append(f"""
+                    <div class="platform-card">
+                        <div class="platform-header">
+                            <h3>{platform}</h3>
+                            <span class="badge badge-{platform_class}">{pass_rate:.1f}%</span>
+                        </div>
+                        <div class="platform-details">
+                            <div class="platform-stat">
+                                <span class="stat-label">Pass</span>
+                                <span class="stat-value stat-pass">{pass_rate:.1f}%</span>
+                                <span class="stat-count">({passed}/{total})</span>
+                            </div>
+                            <div class="platform-stat">
+                                <span class="stat-label">Fail</span>
+                                <span class="stat-value stat-fail">{fail_rate:.1f}%</span>
+                                <span class="stat-count">({failed}/{total})</span>
+                            </div>
+                            <div class="platform-stat">
+                                <span class="stat-label">Skip</span>
+                                <span class="stat-value stat-skip">{skip_rate:.1f}%</span>
+                                <span class="stat-count">({skipped}/{total})</span>
+                            </div>
+                        </div>
+                    </div>
+                """)
+        else:
+            platform_breakdown_html.append('<p class="text-muted">No platform data available</p>')
+        
+        context['platform_breakdown'] = '\n'.join(platform_breakdown_html) if platform_breakdown_html else ''
         
         # Generate runs table rows
         runs_rows = []
