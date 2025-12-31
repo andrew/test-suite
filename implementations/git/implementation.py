@@ -168,6 +168,9 @@ class Implementation(SwhidImplementation):
         which is critical on Windows where filesystem permissions may not
         be preserved during copy operations.
         
+        On Windows, we check the Git index for the intended permissions,
+        as the filesystem may not preserve executable bits.
+        
         Args:
             source_dir: Original source directory path
         
@@ -175,19 +178,77 @@ class Implementation(SwhidImplementation):
             Dict mapping relative file paths to executable status
         """
         import stat
+        import platform
+        import subprocess
+        
         permissions = {}
         if not os.path.exists(source_dir) or not os.path.isdir(source_dir):
             return permissions
         
-        # Walk the source directory and read permissions
+        # On Windows, try to read permissions from Git index first
+        # This is more reliable than filesystem permissions
+        if platform.system() == 'Windows':
+            try:
+                # Get absolute path to source_dir
+                abs_source_dir = os.path.abspath(source_dir)
+                # Get repository root (walk up to find .git)
+                repo_root = abs_source_dir
+                while repo_root != os.path.dirname(repo_root):
+                    if os.path.exists(os.path.join(repo_root, '.git')):
+                        break
+                    repo_root = os.path.dirname(repo_root)
+                else:
+                    repo_root = None
+                
+                # If we found a repo, check Git index for permissions
+                if repo_root:
+                    for root, dirs, files in os.walk(source_dir):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(file_path, source_dir)
+                            # Normalize path separators to forward slashes for cross-platform consistency
+                            rel_path = rel_path.replace(os.sep, '/')
+                            
+                            # Get path relative to repo root
+                            try:
+                                repo_rel_path = os.path.relpath(file_path, repo_root)
+                                # Normalize for Git command (Git uses forward slashes)
+                                repo_rel_path = repo_rel_path.replace(os.sep, '/')
+                                # Check Git index
+                                result = subprocess.run(
+                                    ['git', 'ls-files', '--stage', repo_rel_path],
+                                    cwd=repo_root,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=2
+                                )
+                                if result.returncode == 0 and result.stdout.strip():
+                                    # Format: <mode> <sha> <stage> <path>
+                                    parts = result.stdout.strip().split()
+                                    if parts:
+                                        git_mode = parts[0]
+                                        # Mode is octal string, e.g., '100755' for executable
+                                        is_executable = git_mode.endswith('755')
+                                        permissions[rel_path] = is_executable
+                                        continue
+                            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError):
+                                pass
+            except Exception:
+                # If Git check fails, fall back to filesystem
+                pass
+        
+        # Fall back to filesystem permissions (works on Unix, or if Git check failed)
         for root, dirs, files in os.walk(source_dir):
             for file in files:
                 file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, source_dir)
+                
+                # Skip if we already got permission from Git index
+                if rel_path in permissions:
+                    continue
+                
                 try:
-                    # Calculate relative path from source_dir
-                    rel_path = os.path.relpath(file_path, source_dir)
                     # Normalize path separators to forward slashes for cross-platform consistency
-                    # This ensures lookup works correctly when paths are normalized in _create_git_tree
                     rel_path = rel_path.replace(os.sep, '/')
                     stat_info = os.stat(file_path)
                     is_executable = bool(stat_info.st_mode & stat.S_IEXEC)
