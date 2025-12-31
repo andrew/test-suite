@@ -204,6 +204,8 @@ class SwhidHarness:
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 check=True,
                 timeout=5
             )
@@ -335,6 +337,8 @@ class SwhidHarness:
                     cwd=actual_repo_path,
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     check=True,
                     timeout=10
                 )
@@ -443,6 +447,8 @@ class SwhidHarness:
                     cwd=actual_repo_path,
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     check=True,
                     timeout=10
                 )
@@ -457,6 +463,8 @@ class SwhidHarness:
                             cwd=actual_repo_path,
                             capture_output=True,
                             text=True,
+                            encoding='utf-8',
+                            errors='replace',
                             check=True,
                             timeout=5
                         )
@@ -1396,6 +1404,8 @@ class SwhidHarness:
                 cwd=impl_dir,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=2
             )
             if result.returncode == 0:
@@ -1409,6 +1419,8 @@ class SwhidHarness:
                 ["git", "rev-parse", "HEAD"],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=2
             )
             if result.returncode == 0:

@@ -192,7 +192,7 @@ def get_runner_info() -> RunnerInfo:
         if platform.system() == "Linux":
             import subprocess
             result = subprocess.run(
-                ["uname", "-r"], capture_output=True, text=True, timeout=1
+                ["uname", "-r"], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=1
             )
             if result.returncode == 0:
                 kernel = result.stdout.strip()
