@@ -402,9 +402,11 @@ jobs:
           path: |
             ~/.gem/ruby
             ~/.local/share/gem
-            /opt/hostedtoolcache/Ruby/*/x64/lib/ruby/gems
             ${{ runner.toolCache }}/Ruby/*/x64/lib/ruby/gems
+            ${{ runner.toolCache }}/Ruby/*/x64/bin
           # Note: Cache key doesn't include version - we validate after restore
+          # On Windows, runner.toolCache is C:\hostedtoolcache\windows
+          # On Linux/macOS, runner.toolCache is /opt/hostedtoolcache or /Users/runner/hostedtoolcache
           key: swhid-gem-${{ runner.os }}-ruby-3.2
           restore-keys: |
             swhid-gem-${{ runner.os }}-ruby-3.2-
