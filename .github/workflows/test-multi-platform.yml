@@ -326,6 +326,22 @@ jobs:
           restore-keys: |
             brew-${{ runner.os }}-
       
+      - name: Cache vcpkg packages (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          # Cache vcpkg's built packages, downloads, and binary cache
+          # This significantly speeds up Windows builds by avoiding recompilation
+          path: |
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+            C:\vcpkg\buildtrees
+            C:\Users\${{ runner.user }}\AppData\Local\vcpkg\archives
+          key: vcpkg-Windows-libgit2-x64-windows
+          restore-keys: |
+            vcpkg-Windows-
+      
       - name: Install system dependencies
         shell: bash
         run: |
