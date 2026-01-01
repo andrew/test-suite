@@ -200,6 +200,16 @@ class Implementation(SwhidImplementation):
             # For snapshot: swhid git snapshot <REPO> [COMMIT]
             # Note: requires --features git, so we need to ensure binary was built with git feature
             # Uses positional arguments, not --repo flag
+            
+            # Diagnostic: Compute SWHIDs for all branches and tags in the snapshot
+            # This helps debug Windows-specific snapshot issues
+            try:
+                self._diagnose_snapshot_branches(payload_path, binary_path)
+            except Exception as e:
+                logger.warning(f"Snapshot diagnosis failed (non-critical): {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+            
             cmd.extend(["git", "snapshot", payload_path])
         elif obj_type == "revision":
             # For revision: swhid git revision <REPO> [COMMIT]
@@ -778,6 +788,142 @@ class Implementation(SwhidImplementation):
                     pass
         
         return None
+    
+    def _diagnose_snapshot_branches(self, repo_path: str, binary_path: str):
+        """Diagnostic: Compute and log SWHIDs for all branches and tags in a snapshot.
+        
+        This helps identify which branches/tags have different SWHIDs on Windows vs other platforms.
+        """
+        import subprocess
+        import platform
+        
+        logger.info("=" * 70)
+        logger.info("SNAPSHOT DIAGNOSIS: Computing SWHIDs for all branches and tags")
+        logger.info("=" * 70)
+        logger.info(f"Platform: {platform.system()}")
+        logger.info(f"Repository: {repo_path}")
+        logger.info("")
+        
+        # Get all branches
+        try:
+            result = subprocess.run(
+                ["git", "branch", "-a"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=5
+            )
+            if result.returncode == 0:
+                branches = [b.strip().replace('* ', '').replace('remotes/origin/', '') 
+                           for b in result.stdout.strip().split('\n') if b.strip()]
+                logger.info(f"Branches found: {branches}")
+                
+                # Compute revision SWHID for each branch
+                logger.info("")
+                logger.info("Branch Revision SWHIDs:")
+                logger.info("-" * 70)
+                for branch in branches:
+                    if branch.startswith('remotes/'):
+                        continue
+                    try:
+                        # Get commit hash
+                        commit_result = subprocess.run(
+                            ["git", "rev-parse", branch],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=5
+                        )
+                        if commit_result.returncode == 0:
+                            commit_hash = commit_result.stdout.strip()
+                            # Compute revision SWHID
+                            rev_cmd = [binary_path, "git", "revision", repo_path, commit_hash]
+                            rev_result = subprocess.run(
+                                rev_cmd,
+                                capture_output=True,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                timeout=10
+                            )
+                            if rev_result.returncode == 0:
+                                rev_swhid = rev_result.stdout.strip()
+                                logger.info(f"  {branch:20} -> {rev_swhid}")
+                            else:
+                                logger.warning(f"  {branch:20} -> Failed to compute revision SWHID: {rev_result.stderr[:100]}")
+                    except Exception as e:
+                        logger.debug(f"  {branch:20} -> Error: {e}")
+        except Exception as e:
+            logger.debug(f"Failed to get branches: {e}")
+        
+        # Get all tags
+        try:
+            result = subprocess.run(
+                ["git", "tag", "-l"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=5
+            )
+            if result.returncode == 0:
+                tags = [t.strip() for t in result.stdout.strip().split('\n') if t.strip()]
+                logger.info("")
+                logger.info("Tag Release SWHIDs:")
+                logger.info("-" * 70)
+                for tag in tags:
+                    try:
+                        # Get tag object hash
+                        tag_result = subprocess.run(
+                            ["git", "rev-parse", tag],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=5
+                        )
+                        if tag_result.returncode == 0:
+                            tag_hash = tag_result.stdout.strip()
+                            # Check if it's an annotated tag or lightweight
+                            tag_type_result = subprocess.run(
+                                ["git", "cat-file", "-t", tag],
+                                cwd=repo_path,
+                                capture_output=True,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                timeout=5
+                            )
+                            tag_type = tag_type_result.stdout.strip() if tag_type_result.returncode == 0 else "unknown"
+                            
+                            # Compute release SWHID
+                            rel_cmd = [binary_path, "git", "release", repo_path, tag]
+                            rel_result = subprocess.run(
+                                rel_cmd,
+                                capture_output=True,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                timeout=10
+                            )
+                            if rel_result.returncode == 0:
+                                rel_swhid = rel_result.stdout.strip()
+                                logger.info(f"  {tag:20} ({tag_type:8}) -> {rel_swhid}")
+                            else:
+                                logger.warning(f"  {tag:20} -> Failed to compute release SWHID: {rel_result.stderr[:100]}")
+                    except Exception as e:
+                        logger.debug(f"  {tag:20} -> Error: {e}")
+        except Exception as e:
+            logger.debug(f"Failed to get tags: {e}")
+        
+        logger.info("")
+        logger.info("=" * 70)
     
     def _cleanup_temp_dirs(self):
         """Clean up temporary directories created for permission preservation."""
