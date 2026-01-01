@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read  # Required to list workflow runs and artifacts
     outputs:
       changes_detected: ${{ steps.check-changes.outputs.changes_detected }}
     
@@ -45,15 +46,34 @@ jobs:
         with:
           script: |
             try {
-              const workflowRuns = await github.rest.actions.listWorkflowRuns({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: context.workflow,
-                status: 'success',
-                per_page: 2
-              });
+              // Get workflow file name from context
+              const workflowFile = context.workflow;
+              console.log(`Looking for workflow: ${workflowFile}`);
               
-              if (workflowRuns.data.workflow_runs.length < 2) {
+              // Try to get workflow runs - use workflow file name or workflow ID
+              let workflowRuns;
+              try {
+                workflowRuns = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: workflowFile,
+                  status: 'success',
+                  per_page: 2
+                });
+              } catch (workflowError) {
+                // If workflow_id doesn't work, try using the workflow file path
+                console.log(`First attempt failed: ${workflowError.message}`);
+                console.log(`Trying with workflow file path instead...`);
+                workflowRuns = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: '.github/workflows/test-multi-platform.yml',
+                  status: 'success',
+                  per_page: 2
+                });
+              }
+              
+              if (!workflowRuns.data.workflow_runs || workflowRuns.data.workflow_runs.length < 2) {
                 console.log('No previous successful run found');
                 core.setOutput('artifact_id', '');
                 return;
@@ -80,6 +100,7 @@ jobs:
               core.setOutput('artifact_id', upstreamStateArtifact.id.toString());
             } catch (error) {
               console.log(`Error finding previous run: ${error.message}`);
+              console.log(`Error stack: ${error.stack}`);
               core.setOutput('artifact_id', '');
             }
       
