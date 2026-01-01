@@ -432,9 +432,19 @@ jobs:
           
           # Check if gem is already installed and validate version
           INSTALLED_VERSION=""
+          GEM_AVAILABLE=false
           if gem list -i swhid >/dev/null 2>&1; then
             INSTALLED_VERSION=$(gem list swhid | grep -E "^\s*swhid\s" | sed -E 's/^\s*swhid\s+\(([^)]+)\).*/\1/' | head -1 || echo "")
             echo "swhid gem found in cache: version ${INSTALLED_VERSION}"
+            
+            # Verify gem is actually usable (not just listed)
+            if ruby -r swhid -e "true" 2>/dev/null; then
+              GEM_AVAILABLE=true
+              echo "Verified: Cached gem is usable"
+            else
+              echo "Warning: Cached gem is listed but not usable, will reinstall"
+              GEM_AVAILABLE=false
+            fi
           fi
           
           # Get latest available version
@@ -444,8 +454,8 @@ jobs:
             echo "Latest available swhid gem version: ${LATEST_VERSION}"
             
             # Check if we need to reinstall
-            if [ -n "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ]; then
-              echo "Cached gem version (${INSTALLED_VERSION}) matches latest, using cache"
+            if [ -n "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ] && [ "$GEM_AVAILABLE" = "true" ]; then
+              echo "Cached gem version (${INSTALLED_VERSION}) matches latest and is usable, using cache"
               gem list swhid
             else
               if [ -n "$INSTALLED_VERSION" ]; then
@@ -458,8 +468,8 @@ jobs:
               env MAKE="${MAKE}" gem install swhid --no-document || echo "Warning: swhid gem not available, Ruby implementation will be skipped"
             fi
           else
-            # Fallback: if we can't check version, use cached gem if available
-            if [ -n "$INSTALLED_VERSION" ]; then
+            # Fallback: if we can't check version, use cached gem if available and usable
+            if [ -n "$INSTALLED_VERSION" ] && [ "$GEM_AVAILABLE" = "true" ]; then
               echo "Cannot check latest version, using cached gem (${INSTALLED_VERSION})"
               gem list swhid
             else
@@ -690,6 +700,19 @@ jobs:
           set -e
         continue-on-error: true
       
+      - name: Log cache replacement
+        if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true'
+        shell: bash
+        run: |
+          if [ -f /tmp/swhid-rs/target/.swhid-rs-commit ]; then
+            SAVED_COMMIT=$(cat /tmp/swhid-rs/target/.swhid-rs-commit 2>/dev/null || echo "unknown")
+            echo "💾 Replacing cache: Saving new binary for commit ${SAVED_COMMIT:0:7}"
+            echo "This will replace the old cache entry with key: swhid-rs-${{ runner.os }}-stable"
+          else
+            echo "⚠️ Warning: Commit marker not found, but proceeding with cache save"
+          fi
+        continue-on-error: true
+      
       - name: Save swhid-rs build cache (with commit marker)
         if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true'
         uses: actions/cache/save@v4
@@ -698,6 +721,7 @@ jobs:
           path: /tmp/swhid-rs/target
           # Use the same generic key to replace the old cache entry
           # This ensures the commit marker is saved and old cache is replaced
+          # Note: Each OS saves its own cache, so no race condition here
           key: swhid-rs-${{ runner.os }}-stable
       
       - name: Run harness unit tests
