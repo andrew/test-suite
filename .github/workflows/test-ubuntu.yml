@@ -673,14 +673,116 @@ jobs:
           path: /tmp/swhid-rs-cache
           if-no-artifacts-matched: ignore
       
+      - name: Handle missing artifact
+        if: steps.download-artifacts.outcome != 'success'
+        shell: bash
+        run: |
+          echo "⚠️ Artifact 'swhid-rs-target-Linux' not found"
+          echo "This is expected if:"
+          echo "  - swhid-rs was not rebuilt (using cached binary)"
+          echo "  - swhid-rs build failed"
+          echo "  - swhid-rs setup step was skipped"
+          echo ""
+          echo "Skipping cache save - no new artifacts to cache."
+        continue-on-error: true
+      
       - name: Check artifact structure
         if: steps.download-artifacts.outcome == 'success'
         shell: bash
         run: |
-          echo "Checking artifact structure..."
+          echo "=== STEP 3: Checking artifact structure after download ==="
+          echo ""
+          echo "Root directory contents:"
           ls -la /tmp/swhid-rs-cache/ || true
+          
+          echo ""
+          echo "Searching for commit markers (hidden and non-hidden):"
+          find /tmp/swhid-rs-cache -type f \( -name ".swhid-rs-commit" -o -name "swhid-rs-commit.txt" \) 2>/dev/null | sort || echo "No commit markers found"
+          
+          echo ""
+          echo "Checking if markers exist at expected locations:"
+          if [ -f /tmp/swhid-rs-cache/.swhid-rs-commit ]; then
+            echo "✅ Found: /tmp/swhid-rs-cache/.swhid-rs-commit ($(cat /tmp/swhid-rs-cache/.swhid-rs-commit))"
+          else
+            echo "❌ Missing: /tmp/swhid-rs-cache/.swhid-rs-commit"
+          fi
+          
+          if [ -f /tmp/swhid-rs-cache/swhid-rs-commit.txt ]; then
+            echo "✅ Found: /tmp/swhid-rs-cache/swhid-rs-commit.txt ($(cat /tmp/swhid-rs-cache/swhid-rs-commit.txt))"
+          else
+            echo "❌ Missing: /tmp/swhid-rs-cache/swhid-rs-commit.txt"
+          fi
+          
+          if [ -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
+            echo "✅ Found: /tmp/swhid-rs-cache/target/.swhid-rs-commit ($(cat /tmp/swhid-rs-cache/target/.swhid-rs-commit))"
+          else
+            echo "❌ Missing: /tmp/swhid-rs-cache/target/.swhid-rs-commit"
+          fi
+          
+          if [ -f /tmp/swhid-rs-cache/target/swhid-rs-commit.txt ]; then
+            echo "✅ Found: /tmp/swhid-rs-cache/target/swhid-rs-commit.txt ($(cat /tmp/swhid-rs-cache/target/swhid-rs-commit.txt))"
+          else
+            echo "❌ Missing: /tmp/swhid-rs-cache/target/swhid-rs-commit.txt"
+          fi
+          
+          if [ -d /tmp/swhid-rs-cache/release ]; then
+            echo ""
+            echo "Release directory exists, checking for markers:"
+            if [ -f /tmp/swhid-rs-cache/release/.swhid-rs-commit ]; then
+              echo "✅ Found: /tmp/swhid-rs-cache/release/.swhid-rs-commit ($(cat /tmp/swhid-rs-cache/release/.swhid-rs-commit))"
+            else
+              echo "❌ Missing: /tmp/swhid-rs-cache/release/.swhid-rs-commit"
+            fi
+            
+            if [ -f /tmp/swhid-rs-cache/release/swhid-rs-commit.txt ]; then
+              echo "✅ Found: /tmp/swhid-rs-cache/release/swhid-rs-commit.txt ($(cat /tmp/swhid-rs-cache/release/swhid-rs-commit.txt))"
+            else
+              echo "❌ Missing: /tmp/swhid-rs-cache/release/swhid-rs-commit.txt"
+            fi
+          fi
+          
+          echo ""
+          echo "Finding swhid binary:"
           find /tmp/swhid-rs-cache -type f -name "swhid" | head -5 || true
-          find /tmp/swhid-rs-cache -type f -name ".swhid-rs-commit" | head -5 || true
+        continue-on-error: true
+      
+      - name: Verify commit marker before cache save
+        if: steps.download-artifacts.outcome == 'success'
+        shell: bash
+        run: |
+          echo "=== STEP 4: Verifying commit marker before cache save ==="
+          
+          # Try to find the commit marker
+          COMMIT_MARKER=""
+          if [ -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
+            COMMIT_MARKER="/tmp/swhid-rs-cache/target/.swhid-rs-commit"
+          elif [ -f /tmp/swhid-rs-cache/target/swhid-rs-commit.txt ]; then
+            COMMIT_MARKER="/tmp/swhid-rs-cache/target/swhid-rs-commit.txt"
+          elif [ -f /tmp/swhid-rs-cache/.swhid-rs-commit ]; then
+            COMMIT_MARKER="/tmp/swhid-rs-cache/.swhid-rs-commit"
+          elif [ -f /tmp/swhid-rs-cache/swhid-rs-commit.txt ]; then
+            COMMIT_MARKER="/tmp/swhid-rs-cache/swhid-rs-commit.txt"
+          elif [ -f /tmp/swhid-rs-cache/release/.swhid-rs-commit ]; then
+            COMMIT_MARKER="/tmp/swhid-rs-cache/release/.swhid-rs-commit"
+          elif [ -f /tmp/swhid-rs-cache/release/swhid-rs-commit.txt ]; then
+            COMMIT_MARKER="/tmp/swhid-rs-cache/release/swhid-rs-commit.txt"
+          fi
+          
+          if [ -n "$COMMIT_MARKER" ]; then
+            echo "✅ Commit marker found at: $COMMIT_MARKER"
+            echo "Commit hash: $(cat "$COMMIT_MARKER")"
+            
+            # Ensure it's in the expected location for cache
+            if [ ! -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
+              echo "Creating .swhid-rs-commit in target directory from found marker..."
+              mkdir -p /tmp/swhid-rs-cache/target
+              cp "$COMMIT_MARKER" /tmp/swhid-rs-cache/target/.swhid-rs-commit
+              echo "Created: $(cat /tmp/swhid-rs-cache/target/.swhid-rs-commit)"
+            fi
+          else
+            echo "⚠️ WARNING: No commit marker found in artifact!"
+            echo "This may cause cache validation issues."
+          fi
         continue-on-error: true
       
       - name: Save swhid-rs build cache
