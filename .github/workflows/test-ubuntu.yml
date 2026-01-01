@@ -299,6 +299,9 @@ jobs:
               SWHID_RS_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
               echo "swhid-rs commit: ${SWHID_RS_COMMIT:0:7}"
               
+              # Set the commit-specific cache key for saving
+              echo "swhid_rs_cache_key=swhid-rs-${{ runner.os }}-${SWHID_RS_COMMIT:0:7}" >> $GITHUB_OUTPUT
+              
               # Restore cached target/ directory if it was preserved
               if [ -d /tmp/swhid-rs-cache-backup/target ]; then
                 echo "Restoring cached build artifacts..."
