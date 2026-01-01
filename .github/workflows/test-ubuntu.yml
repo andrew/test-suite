@@ -474,6 +474,27 @@ jobs:
           set -e
         continue-on-error: true
       
+      - name: Verify commit marker exists before upload
+        if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true'
+        shell: bash
+        run: |
+          echo "Verifying commit marker exists..."
+          if [ -f /tmp/swhid-rs/target/.swhid-rs-commit ]; then
+            echo "✅ Commit marker found: $(cat /tmp/swhid-rs/target/.swhid-rs-commit)"
+            ls -la /tmp/swhid-rs/target/.swhid-rs-commit
+          else
+            echo "⚠️ WARNING: Commit marker not found at /tmp/swhid-rs/target/.swhid-rs-commit"
+            echo "Listing target directory contents:"
+            ls -la /tmp/swhid-rs/target/ | head -20 || true
+            echo "Creating commit marker now..."
+            cd /tmp/swhid-rs
+            SWHID_RS_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+            mkdir -p target
+            echo "$SWHID_RS_COMMIT" > target/.swhid-rs-commit
+            echo "Created commit marker: $(cat target/.swhid-rs-commit)"
+          fi
+        continue-on-error: true
+      
       - name: Upload swhid-rs build artifacts (if rebuilt)
         if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true'
         uses: actions/upload-artifact@v4
