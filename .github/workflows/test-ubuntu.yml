@@ -672,7 +672,6 @@ jobs:
         with:
           name: swhid-rs-target-Linux
           path: /tmp/swhid-rs-cache
-          if-no-artifacts-matched: ignore
       
       - name: Handle missing artifact
         if: steps.download-artifacts.outcome != 'success'
