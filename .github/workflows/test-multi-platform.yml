@@ -401,6 +401,27 @@ jobs:
           toolchain: stable
         continue-on-error: true
       
+      - name: Cache Cargo registry and git cache
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+      
+      - name: Cache swhid-rs build artifacts
+        id: cache-swhid-rs
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: /tmp/swhid-rs/target
+          key: swhid-rs-${{ runner.os }}-${{ hash(secrets.SWHID_RS_REPO || 'https://github.com/swhid/swhid-rs.git') }}
+          restore-keys: |
+            swhid-rs-${{ runner.os }}-
+      
       - name: Setup SSH for private repository access (optional)
         shell: bash
         run: |
@@ -480,9 +501,15 @@ jobs:
             fi
             if [ $CLONE_EXIT_CODE -eq 0 ] && [ -d /tmp/swhid-rs ]; then
               cd /tmp/swhid-rs
-              echo "Building swhid-rs..."
-              cargo build --release 2>&1 | tee /tmp/swhid-rs-build.log
-              BUILD_EXIT_CODE=${PIPESTATUS[0]}
+              # Check if we have cached build artifacts (cache may have restored target/)
+              if [ -d target/release ] && [ -f target/release/swhid ]; then
+                echo "Using cached swhid-rs binary"
+                BUILD_EXIT_CODE=0
+              else
+                echo "Building swhid-rs (cache miss or outdated)..."
+                cargo build --release 2>&1 | tee /tmp/swhid-rs-build.log
+                BUILD_EXIT_CODE=${PIPESTATUS[0]}
+              fi
               if [ $BUILD_EXIT_CODE -eq 0 ]; then
                 echo "swhid-rs built successfully"
                 echo "SWHID_RS_PATH=/tmp/swhid-rs" >> $GITHUB_ENV
