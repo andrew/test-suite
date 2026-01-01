@@ -183,7 +183,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          # Note: Cargo.lock is in swhid-rs repo (cloned later), so we use a simple key
+          # The cache is for downloaded crates, which are versioned by Cargo itself
+          # Cargo will re-download if versions don't match, so this cache is safe
+          key: cargo-${{ runner.os }}-registry
           restore-keys: |
             cargo-${{ runner.os }}-
       
