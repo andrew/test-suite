@@ -353,15 +353,38 @@ jobs:
           elif [ "$RUNNER_OS" == "Windows" ]; then
             # On Windows, libgit2 is optional - pygit2 can work without it in some cases
             # Try to install via vcpkg, but don't fail if it doesn't work
-            if command -v choco &> /dev/null; then
+            # vcpkg may already be installed on the runner (check C:\vcpkg or C:\tools\vcpkg)
+            VCPKG_PATH=""
+            if [ -d "C:/vcpkg" ]; then
+              VCPKG_PATH="C:/vcpkg"
+              export PATH="$VCPKG_PATH:$PATH"
+              echo "Found vcpkg at C:/vcpkg"
+            elif [ -d "C:/tools/vcpkg" ]; then
+              VCPKG_PATH="C:/tools/vcpkg"
+              export PATH="$VCPKG_PATH:$PATH"
+              echo "Found vcpkg at C:/tools/vcpkg"
+            elif command -v vcpkg &> /dev/null; then
+              VCPKG_PATH=$(command -v vcpkg)
+              echo "Found vcpkg in PATH: $VCPKG_PATH"
+            elif command -v choco &> /dev/null; then
+              echo "Installing vcpkg via Chocolatey..."
               choco install -y vcpkg || echo "Warning: vcpkg installation failed, continuing without libgit2"
-              if command -v vcpkg &> /dev/null; then
-                vcpkg install libgit2:x64-windows || echo "Warning: libgit2 installation failed, continuing without it"
-              else
-                echo "Warning: vcpkg not in PATH, libgit2 may not be available"
+              if [ -d "C:/vcpkg" ]; then
+                VCPKG_PATH="C:/vcpkg"
+                export PATH="$VCPKG_PATH:$PATH"
+              elif command -v vcpkg &> /dev/null; then
+                VCPKG_PATH=$(command -v vcpkg)
               fi
             else
-              echo "Warning: Chocolatey not available, libgit2 may not be available"
+              echo "Warning: Chocolatey not available, trying to use vcpkg if already installed"
+            fi
+            
+            # Install libgit2 if vcpkg is available
+            if [ -n "$VCPKG_PATH" ] || command -v vcpkg &> /dev/null; then
+              echo "Installing libgit2 via vcpkg (this may take a while on first run, but will be cached)..."
+              vcpkg install libgit2:x64-windows --recurse || echo "Warning: libgit2 installation failed, continuing without it"
+            else
+              echo "Warning: vcpkg not found, libgit2 may not be available"
             fi
           fi
         continue-on-error: true
