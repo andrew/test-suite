@@ -384,7 +384,8 @@ jobs:
             ~/.local/share/gem
             /opt/hostedtoolcache/Ruby/*/x64/lib/ruby/gems
             ${{ runner.toolCache }}/Ruby/*/x64/lib/ruby/gems
-          key: swhid-gem-${{ runner.os }}-ruby-3.2-${{ hashFiles('**/Gemfile.lock') }}
+          # Note: Cache key doesn't include version - we validate after restore
+          key: swhid-gem-${{ runner.os }}-ruby-3.2
           restore-keys: |
             swhid-gem-${{ runner.os }}-ruby-3.2-
       
@@ -429,14 +430,42 @@ jobs:
           echo "Verifying MAKE variable:"
           echo "${MAKE}" | head -1
           
-          # Check if gem is already installed
+          # Check if gem is already installed and validate version
+          INSTALLED_VERSION=""
           if gem list -i swhid >/dev/null 2>&1; then
-            echo "swhid gem already installed, skipping installation"
-            gem list swhid
+            INSTALLED_VERSION=$(gem list swhid | grep -E "^\s*swhid\s" | sed -E 's/^\s*swhid\s+\(([^)]+)\).*/\1/' | head -1 || echo "")
+            echo "swhid gem found in cache: version ${INSTALLED_VERSION}"
+          fi
+          
+          # Get latest available version
+          GEM_SEARCH_OUTPUT=$(gem search -r -e swhid 2>/dev/null | grep -E "^swhid\s" | head -1 || echo "")
+          if [ -n "$GEM_SEARCH_OUTPUT" ]; then
+            LATEST_VERSION=$(echo "$GEM_SEARCH_OUTPUT" | sed -E 's/^swhid\s+\(([^,)]+).*\)$/\1/' | xargs)
+            echo "Latest available swhid gem version: ${LATEST_VERSION}"
+            
+            # Check if we need to reinstall
+            if [ -n "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" = "$LATEST_VERSION" ]; then
+              echo "Cached gem version (${INSTALLED_VERSION}) matches latest, using cache"
+              gem list swhid
+            else
+              if [ -n "$INSTALLED_VERSION" ]; then
+                echo "Cached gem version (${INSTALLED_VERSION}) differs from latest (${LATEST_VERSION}), reinstalling..."
+              else
+                echo "Installing swhid gem (this may take a while for native extensions)..."
+              fi
+              # Uninstall old version if exists, then install latest
+              gem uninstall swhid -x 2>/dev/null || true
+              env MAKE="${MAKE}" gem install swhid --no-document || echo "Warning: swhid gem not available, Ruby implementation will be skipped"
+            fi
           else
-            echo "Installing swhid gem (this may take a while for native extensions)..."
-            # Run gem install with MAKE explicitly set
-            env MAKE="${MAKE}" gem install swhid --no-document || echo "Warning: swhid gem not available, Ruby implementation will be skipped"
+            # Fallback: if we can't check version, use cached gem if available
+            if [ -n "$INSTALLED_VERSION" ]; then
+              echo "Cannot check latest version, using cached gem (${INSTALLED_VERSION})"
+              gem list swhid
+            else
+              echo "Installing swhid gem (this may take a while for native extensions)..."
+              env MAKE="${MAKE}" gem install swhid --no-document || echo "Warning: swhid gem not available, Ruby implementation will be skipped"
+            fi
           fi
         continue-on-error: true
       
