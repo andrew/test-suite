@@ -56,12 +56,12 @@ jobs:
               let workflowRuns;
               try {
                 workflowRuns = await github.rest.actions.listWorkflowRuns({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
                   workflow_id: workflowFile,
-                  status: 'success',
-                  per_page: 2
-                });
+                status: 'success',
+                per_page: 2
+              });
               } catch (workflowError) {
                 // If workflow_id doesn't work, try using the workflow file path
                 console.log(`First attempt failed: ${workflowError.message}`);
@@ -453,9 +453,16 @@ jobs:
           # Check if gem is already installed and validate version
           INSTALLED_VERSION=""
           GEM_AVAILABLE=false
+          
+          # Debug: Show gem environment to understand where gems are installed
+          echo "=== Gem Environment Debug ==="
+          gem env 2>/dev/null | grep -E "(INSTALLATION|USER INSTALLATION|EXECUTABLE)" || true
+          echo "=== End Gem Environment Debug ==="
+          
+          # Check if gem is installed via gem list
           if gem list -i swhid >/dev/null 2>&1; then
             INSTALLED_VERSION=$(gem list swhid | grep -E "^\s*swhid\s" | sed -E 's/^\s*swhid\s+\(([^)]+)\).*/\1/' | head -1 || echo "")
-            echo "swhid gem found in cache: version ${INSTALLED_VERSION}"
+            echo "swhid gem found via gem list: version ${INSTALLED_VERSION}"
             
             # Verify gem is actually usable (not just listed)
             if ruby -r swhid -e "true" 2>/dev/null; then
@@ -465,6 +472,11 @@ jobs:
               echo "Warning: Cached gem is listed but not usable, will reinstall"
               GEM_AVAILABLE=false
             fi
+          else
+            echo "Gem not found via 'gem list'"
+            # On Windows, the cache might restore files but Ruby doesn't see them
+            # This can happen if the cache path doesn't match Ruby's gem paths exactly
+            # We'll need to reinstall to ensure Ruby recognizes the gem
           fi
           
           # Get latest available version
@@ -775,7 +787,7 @@ jobs:
               
               if [ "$NEED_REBUILD" = "true" ]; then
                 cargo build --release --features git 2>&1 | tee /tmp/swhid-rs-build.log
-                BUILD_EXIT_CODE=${PIPESTATUS[0]}
+              BUILD_EXIT_CODE=${PIPESTATUS[0]}
                 if [ $BUILD_EXIT_CODE -eq 0 ]; then
                   REBUILT=true
                   # Save the commit hash for future cache validation
