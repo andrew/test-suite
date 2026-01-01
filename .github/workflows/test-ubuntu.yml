@@ -29,17 +29,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'  # Automatically cache pip packages
-      
-      - name: Cache pip packages (additional)
-        uses: actions/cache@v4
-        continue-on-error: true
-        with:
-          # Cache pip's download cache and wheel cache
-          path: |
-            ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            pip-${{ runner.os }}-${{ matrix.python-version }}-
+          # Note: setup-python@v5 handles pip caching automatically, no need for explicit cache step
       
       - name: Install system dependencies
         shell: bash
