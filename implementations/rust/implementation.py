@@ -186,7 +186,8 @@ class Implementation(SwhidImplementation):
         if obj_type == "content":
             # Try both formats to support both experimental and published versions
             # First try experimental format (positional), then fall back to published (--file)
-            result_swhid = self._try_content_command(binary_path, payload_path, None, None)
+            # Pass version and hash_algo to ensure flags are added to the command
+            result_swhid = self._try_content_command(binary_path, payload_path, version, hash_algo)
             if result_swhid:
                 return result_swhid
             
@@ -286,7 +287,11 @@ class Implementation(SwhidImplementation):
                     if self._content_command_format == "positional":
                         # Try with --file flag
                         alt_cmd = [binary_path]
-                        # Note: version and hash_algo not supported on main branch
+                        # Add version/hash flags if specified
+                        if version == 2:
+                            alt_cmd.extend(["--version", "2"])
+                        if hash_algo == "sha256":
+                            alt_cmd.extend(["--hash", "sha256"])
                         alt_cmd.extend(["content", "--file", payload_path])
                         
                         alt_result = subprocess.run(
@@ -306,7 +311,11 @@ class Implementation(SwhidImplementation):
                     else:
                         # Try with positional argument
                         alt_cmd = [binary_path]
-                        # Note: version and hash_algo not supported on main branch
+                        # Add version/hash flags if specified
+                        if version == 2:
+                            alt_cmd.extend(["--version", "2"])
+                        if hash_algo == "sha256":
+                            alt_cmd.extend(["--hash", "sha256"])
                         alt_cmd.extend(["content", payload_path])
                         
                         alt_result = subprocess.run(
