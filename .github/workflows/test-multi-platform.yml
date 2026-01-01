@@ -502,6 +502,19 @@ jobs:
           SWHID_RS_TOKEN: ${{ secrets.SWHID_RS_TOKEN }}
         run: |
           set +e
+          # Preserve cached target/ directory if it exists
+          if [ -d /tmp/swhid-rs/target ]; then
+            echo "Preserving cached build artifacts..."
+            mkdir -p /tmp/swhid-rs-cache-backup
+            mv /tmp/swhid-rs/target /tmp/swhid-rs-cache-backup/ || true
+          fi
+          
+          # Clean up any existing /tmp/swhid-rs directory
+          if [ -d /tmp/swhid-rs ]; then
+            echo "Cleaning up existing /tmp/swhid-rs directory..."
+            rm -rf /tmp/swhid-rs
+          fi
+          
           # Try to clone the swhid-rs repository
           if [ -n "$SWHID_RS_REPO" ]; then
             echo "Attempting to clone swhid-rs from $SWHID_RS_REPO"
@@ -559,7 +572,15 @@ jobs:
             fi
             if [ $CLONE_EXIT_CODE -eq 0 ] && [ -d /tmp/swhid-rs ]; then
               cd /tmp/swhid-rs
-              # Check if we have cached build artifacts (cache may have restored target/)
+              
+              # Restore cached target/ directory if it was preserved
+              if [ -d /tmp/swhid-rs-cache-backup/target ]; then
+                echo "Restoring cached build artifacts..."
+                mv /tmp/swhid-rs-cache-backup/target . || true
+                rm -rf /tmp/swhid-rs-cache-backup || true
+              fi
+              
+              # Check if we have cached build artifacts
               if [ -d target/release ] && [ -f target/release/swhid ]; then
                 echo "Using cached swhid-rs binary"
                 BUILD_EXIT_CODE=0
