@@ -542,10 +542,21 @@ jobs:
       
       - name: Verify files before artifact upload
         if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true'
+        id: verify-upload
         shell: bash
         run: |
           echo "=== STEP 2: Verifying files before artifact upload ==="
-          cd /tmp/swhid-rs
+          
+          # Use SWHID_RS_PATH if available, otherwise default to /tmp/swhid-rs
+          SWHID_RS_DIR="${SWHID_RS_PATH:-/tmp/swhid-rs}"
+          echo "Using swhid-rs directory: $SWHID_RS_DIR"
+          
+          cd "$SWHID_RS_DIR"
+          
+          # Get absolute path for artifact upload
+          TARGET_DIR="$(pwd)/target"
+          echo "Target directory (absolute): $TARGET_DIR"
+          echo "target_dir=$TARGET_DIR" >> $GITHUB_OUTPUT
           
           echo "Checking commit markers:"
           if [ -f target/.swhid-rs-commit ]; then
@@ -567,15 +578,21 @@ jobs:
           echo ""
           echo "Files to be uploaded (first 20):"
           find target -type f | head -20 || true
+          
+          # Verify the path exists and is accessible
+          if [ ! -d "target" ]; then
+            echo "❌ ERROR: target directory does not exist at $TARGET_DIR"
+            exit 1
+          fi
         continue-on-error: true
       
       - name: Upload swhid-rs build artifacts (if rebuilt)
-        if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true'
+        if: always() && steps.swhid-rs-setup.outcome == 'success' && steps.swhid-rs-setup.outputs.swhid_rs_rebuilt == 'true' && steps.verify-upload.outcome == 'success'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: swhid-rs-target-Linux
-          path: /tmp/swhid-rs/target
+          path: ${{ steps.verify-upload.outputs.target_dir || '/tmp/swhid-rs/target' }}
           retention-days: 1
           if-no-files-found: ignore
           # Note: upload-artifact@v4 may exclude hidden files by default
