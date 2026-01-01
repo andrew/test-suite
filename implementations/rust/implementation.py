@@ -153,7 +153,7 @@ class Implementation(SwhidImplementation):
         needs_git = obj_type in ("snapshot", "revision", "release") or obj_type == "directory"
         
         # Ensure binary is built (check and build if needed)
-        binary_path = self._ensure_binary_built(project_root, needs_git=needs_git)
+        binary_path = self._ensure_binary_built(project_root)
         
         # Build the command based on object type
         # Run the binary directly instead of cargo run
