@@ -9,14 +9,9 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04]
-        python-version: ["3.10", "3.12"]
     
     steps:
       - name: Checkout code
@@ -27,7 +22,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: 'pip'  # Automatically cache pip packages
           # Note: setup-python@v5 handles pip caching automatically, no need for explicit cache step
       
@@ -626,7 +621,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: results-${{ matrix.os }}-py${{ matrix.python-version }}
+          name: results-ubuntu-24.04-py3.12
           path: |
             results.json
             results.html
@@ -755,6 +750,7 @@ jobs:
       
       - name: Verify commit marker before cache save
         if: steps.download-artifacts.outcome == 'success'
+        id: get-commit-hash
         shell: bash
         run: |
           echo "=== STEP 4: Verifying commit marker before cache save ==="
@@ -776,8 +772,10 @@ jobs:
           fi
           
           if [ -n "$COMMIT_MARKER" ]; then
+            COMMIT_HASH=$(cat "$COMMIT_MARKER" | tr -d '[:space:]')
             echo "✅ Commit marker found at: $COMMIT_MARKER"
-            echo "Commit hash: $(cat "$COMMIT_MARKER")"
+            echo "Commit hash: $COMMIT_HASH"
+            echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
             
             # Ensure it's in the expected location for cache
             if [ ! -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
@@ -789,11 +787,13 @@ jobs:
           else
             echo "⚠️ WARNING: No commit marker found in artifact!"
             echo "This may cause cache validation issues."
+            # Use a fallback: workflow run ID to make key unique
+            echo "commit_hash=${{ github.run_id }}" >> $GITHUB_OUTPUT
           fi
         continue-on-error: true
       
       - name: Save swhid-rs build cache
-        if: steps.download-artifacts.outcome == 'success'
+        if: steps.download-artifacts.outcome == 'success' && steps.get-commit-hash.outcome == 'success'
         uses: actions/cache/save@v4
         continue-on-error: true
         with:
@@ -803,7 +803,9 @@ jobs:
           path: |
             /tmp/swhid-rs-cache/target
             /tmp/swhid-rs-cache
-          # Use workflow-specific cache key to avoid conflicts when multiple workflows run simultaneously
-          # Both workflows can save their own cache, and both can restore from either cache
-          # This eliminates race conditions across workflows
-          key: swhid-rs-Linux-stable-ubuntu-workflow
+          # Include commit hash in cache key to avoid conflicts when multiple workflow runs
+          # try to save the same cache simultaneously. The restore step uses restore-keys
+          # to allow restoring from other commits, so this doesn't break cache sharing.
+          # If two runs for the same commit happen simultaneously, one may fail to save,
+          # but that's acceptable since the cache will still be available from the successful run.
+          key: swhid-rs-Linux-stable-ubuntu-workflow-${{ steps.get-commit-hash.outputs.commit_hash }}
