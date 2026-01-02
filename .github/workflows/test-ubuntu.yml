@@ -802,8 +802,10 @@ jobs:
             /tmp/swhid-rs-cache
           # Use simple key without commit hash for reliable restore
           # The commit marker file inside the cache validates if it matches current commit
-          # If multiple workflows try to save simultaneously, one may fail with
-          # "Unable to reserve cache" - this is expected and harmless (continue-on-error handles it).
-          # The cache will be overwritten on next successful save, which is fine since
-          # the commit marker ensures we rebuild when commit changes anyway.
+          # NOTE: GitHub Actions caches are IMMUTABLE - once created, they cannot be overwritten.
+          # If a cache with this key already exists, the save will fail with "Unable to reserve cache".
+          # This is expected and harmless (continue-on-error handles it). The existing cache will remain.
+          # The commit marker validation ensures we rebuild when commit changes, so stale caches
+          # are detected and new builds are triggered. The cache will only be updated if it's deleted
+          # or expires (7 days of no access), allowing a new cache to be created with the same key.
           key: swhid-rs-Linux-stable-ubuntu-workflow
