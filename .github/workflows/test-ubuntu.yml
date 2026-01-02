@@ -258,18 +258,14 @@ jobs:
           # Use /tmp/swhid-rs/target - works on all platforms with bash shell
           # Try workflow-specific cache first, then fall back to generic cache
           # This allows both workflows to share caches while avoiding save conflicts
-          # Note: Cache keys may include commit hash from swhid-rs repo (not known at restore time)
-          # So we use restore-keys with prefix matching to find any cache with matching prefix
+          # Note: We use a simple key without commit hash for reliable restore
+          # The commit marker file inside the cache is used to validate if cache matches current commit
           path: /tmp/swhid-rs/target
-          # Try exact match first (for old format without commit hash), then use restore-keys
-          # restore-keys match as prefixes, so they will match:
-          # - Old format: swhid-rs-Linux-stable-ubuntu-workflow (exact match if key matches)
-          # - New format: swhid-rs-Linux-stable-ubuntu-workflow-<commit-hash> (prefix match via restore-keys)
           key: swhid-rs-Linux-stable-ubuntu-workflow
           restore-keys: |
-            swhid-rs-Linux-stable-ubuntu-workflow-
-            swhid-rs-Linux-stable-multi-platform-workflow-
-            swhid-rs-Linux-stable-
+            swhid-rs-Linux-stable-ubuntu-workflow
+            swhid-rs-Linux-stable-multi-platform-workflow
+            swhid-rs-Linux-stable
             swhid-rs-Linux-
       
       - name: Check cache restore status
@@ -804,9 +800,10 @@ jobs:
           path: |
             /tmp/swhid-rs-cache/target
             /tmp/swhid-rs-cache
-          # Include commit hash in cache key to avoid conflicts when multiple workflow runs
-          # try to save the same cache simultaneously. GitHub Actions caches are immutable,
-          # so if a cache already exists for this commit, the save will fail with
+          # Use simple key without commit hash for reliable restore
+          # The commit marker file inside the cache validates if it matches current commit
+          # If multiple workflows try to save simultaneously, one may fail with
           # "Unable to reserve cache" - this is expected and harmless (continue-on-error handles it).
-          # The cache is already available, so we don't need to save it again.
-          key: swhid-rs-Linux-stable-ubuntu-workflow-${{ steps.get-commit-hash.outputs.commit_hash }}
+          # The cache will be overwritten on next successful save, which is fine since
+          # the commit marker ensures we rebuild when commit changes anyway.
+          key: swhid-rs-Linux-stable-ubuntu-workflow
