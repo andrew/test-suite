@@ -7,9 +7,13 @@ for the testing harness.
 
 import subprocess
 import os
+import platform
+import logging
 from typing import Optional
 
 from harness.plugins.base import SwhidImplementation, ImplementationInfo, ImplementationCapabilities
+
+logger = logging.getLogger(__name__)
 
 class Implementation(SwhidImplementation):
     """Ruby SWHID implementation plugin."""
@@ -28,11 +32,16 @@ class Implementation(SwhidImplementation):
         paths first, then falling back to PATH search.
         """
         if self._swhid_path:
+            logger.debug(f"Ruby: Using cached swhid path: {self._swhid_path}")
             return self._swhid_path
         
         import shutil
         import os
         import glob
+        
+        logger.debug("Ruby: Starting swhid binary detection")
+        is_windows = platform.system() == "Windows"
+        logger.debug(f"Ruby: Platform is Windows: {is_windows}")
         
         # CRITICAL: Check gem-specific paths FIRST to prefer Ruby gem over Rust binary
         # The Rust binary may be in PATH and come first, but we need the Ruby gem
@@ -41,11 +50,31 @@ class Implementation(SwhidImplementation):
             os.path.join(home, ".gem", "ruby", "*", "bin", "swhid"),
             os.path.join(home, ".local", "share", "gem", "ruby", "*", "bin", "swhid"),
         ]
+        logger.debug(f"Ruby: Checking standard gem paths: {gem_paths}")
         
         # Also try GEM_HOME if set (used by ruby/setup-ruby)
         gem_home = os.environ.get("GEM_HOME")
         if gem_home:
-            gem_paths.append(os.path.join(gem_home, "bin", "swhid"))
+            logger.debug(f"Ruby: GEM_HOME is set: {gem_home}")
+            # Normalize path separators for Windows compatibility
+            gem_home_normalized = os.path.normpath(gem_home)
+            gem_home_bin = os.path.join(gem_home_normalized, "bin", "swhid")
+            gem_paths.append(gem_home_bin)
+            logger.debug(f"Ruby: Added GEM_HOME path: {gem_home_bin}")
+            # Also check if the bin directory exists
+            gem_home_bin_dir = os.path.join(gem_home_normalized, "bin")
+            if os.path.isdir(gem_home_bin_dir):
+                logger.debug(f"Ruby: GEM_HOME/bin directory exists: {gem_home_bin_dir}")
+                # List files in bin directory for debugging
+                try:
+                    bin_files = os.listdir(gem_home_bin_dir)
+                    logger.debug(f"Ruby: Files in GEM_HOME/bin: {bin_files}")
+                except Exception as e:
+                    logger.debug(f"Ruby: Could not list GEM_HOME/bin: {e}")
+            else:
+                logger.debug(f"Ruby: GEM_HOME/bin directory does not exist: {gem_home_bin_dir}")
+        else:
+            logger.debug("Ruby: GEM_HOME is not set")
         
         # Also try system gem locations via Ruby
         try:
@@ -67,43 +96,143 @@ class Implementation(SwhidImplementation):
         
         # Try to find swhid in gem-specific locations first
         for pattern in gem_paths:
-            matches = glob.glob(pattern)
-            for swhid_cmd in matches:
-                if os.path.isfile(swhid_cmd) and os.access(swhid_cmd, os.X_OK):
-                    # Verify it's the Ruby gem by checking if it supports 'snapshot' command
-                    # (Rust version doesn't support snapshot yet)
+            logger.debug(f"Ruby: Checking pattern: {pattern}")
+            # Normalize the pattern path for Windows compatibility
+            pattern_normalized = os.path.normpath(pattern)
+            
+            # Try glob first (for wildcard patterns)
+            matches = glob.glob(pattern_normalized)
+            
+            # Also try direct path check (for exact paths, especially on Windows)
+            if os.path.isfile(pattern_normalized):
+                matches.append(pattern_normalized)
+            
+            # On Windows, also try .bat and .cmd extensions
+            if is_windows:
+                bat_pattern = pattern_normalized + ".bat"
+                cmd_pattern = pattern_normalized + ".cmd"
+                matches.extend(glob.glob(bat_pattern))
+                matches.extend(glob.glob(cmd_pattern))
+                # Direct path checks for .bat/.cmd
+                if os.path.isfile(bat_pattern):
+                    matches.append(bat_pattern)
+                if os.path.isfile(cmd_pattern):
+                    matches.append(cmd_pattern)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_matches = []
+            for match in matches:
+                normalized_match = os.path.normpath(match)
+                if normalized_match not in seen:
+                    seen.add(normalized_match)
+                    unique_matches.append(normalized_match)
+            
+            # On Windows, prefer .bat/.cmd files over Unix scripts
+            if is_windows:
+                # Sort matches to prefer .bat/.cmd files
+                def sort_key(cmd):
+                    if cmd.endswith('.bat'):
+                        return 0
+                    elif cmd.endswith('.cmd'):
+                        return 1
+                    elif cmd.endswith('.exe'):
+                        return 2
+                    else:
+                        return 3
+                unique_matches.sort(key=sort_key)
+            
+            for swhid_cmd in unique_matches:
+                logger.debug(f"Ruby: Checking candidate: {swhid_cmd}")
+                # On Windows, check if file exists (os.X_OK may not work for .bat files)
+                if os.path.isfile(swhid_cmd):
+                    logger.debug(f"Ruby: File exists: {swhid_cmd}")
+                    # On Windows, .bat/.cmd files are always "executable"
+                    if is_windows or os.access(swhid_cmd, os.X_OK):
+                        logger.debug(f"Ruby: File is accessible, verifying it's Ruby gem...")
+                        # Verify it's the Ruby gem by checking if it supports 'snapshot' command
+                        # (Rust version doesn't support snapshot yet)
+                        # On Windows, if we have a .bat file, we can be more confident it's the Ruby gem
+                        if is_windows and swhid_cmd.endswith(('.bat', '.cmd')):
+                            logger.info(f"Ruby: Found Ruby gem .bat wrapper at: {swhid_cmd}")
+                            self._swhid_path = swhid_cmd
+                            return swhid_cmd
+                        
+                        try:
+                            result = subprocess.run(
+                                [swhid_cmd, "snapshot", "--help"],
+                                capture_output=True,
+                                text=True,
+                                timeout=2
+                            )
+                            logger.debug(f"Ruby: snapshot --help result: returncode={result.returncode}, stdout={result.stdout[:100]}, stderr={result.stderr[:100]}")
+                            if result.returncode == 0 or "snapshot" in result.stdout or "snapshot" in result.stderr:
+                                logger.info(f"Ruby: Found Ruby gem swhid at: {swhid_cmd}")
+                                self._swhid_path = swhid_cmd
+                                return swhid_cmd
+                            else:
+                                logger.debug(f"Ruby: Binary doesn't support snapshot command, skipping")
+                        except Exception as e:
+                            logger.debug(f"Ruby: Exception verifying binary: {e}")
+                            # On Windows, if verification fails but we have a .bat file, assume it's Ruby gem
+                            if is_windows and swhid_cmd.endswith(('.bat', '.cmd')):
+                                logger.info(f"Ruby: Found Ruby gem .bat wrapper (verification failed, but .bat indicates Ruby gem): {swhid_cmd}")
+                                self._swhid_path = swhid_cmd
+                                return swhid_cmd
+                            # If check fails, assume it's the Ruby gem (better than nothing)
+                            logger.warning(f"Ruby: Could not verify snapshot support, assuming Ruby gem: {swhid_cmd}")
+                            self._swhid_path = swhid_cmd
+                            return swhid_cmd
+                else:
+                    logger.debug(f"Ruby: File does not exist: {swhid_cmd}")
+        
+        # Fallback: try to find swhid command in PATH (may be Rust binary)
+        logger.debug("Ruby: Checking PATH for swhid command")
+        path_env = os.environ.get("PATH", "")
+        logger.debug(f"Ruby: PATH contains {len(path_env.split(os.pathsep))} entries")
+        if is_windows:
+            for ext in ["", ".bat", ".cmd"]:
+                swhid_name = "swhid" + ext
+                swhid_path = shutil.which(swhid_name)
+                if swhid_path:
+                    logger.debug(f"Ruby: Found {swhid_name} in PATH: {swhid_path}")
+                    # Verify it supports snapshot (Ruby gem) vs not (Rust binary)
                     try:
                         result = subprocess.run(
-                            [swhid_cmd, "snapshot", "--help"],
+                            [swhid_path, "snapshot", "--help"],
                             capture_output=True,
                             text=True,
                             timeout=2
                         )
+                        logger.debug(f"Ruby: PATH binary snapshot check: returncode={result.returncode}")
                         if result.returncode == 0 or "snapshot" in result.stdout or "snapshot" in result.stderr:
-                            self._swhid_path = swhid_cmd
-                            return swhid_cmd
-                    except Exception:
-                        # If check fails, assume it's the Ruby gem (better than nothing)
-                        self._swhid_path = swhid_cmd
-                        return swhid_cmd
+                            logger.info(f"Ruby: Found Ruby gem swhid in PATH: {swhid_path}")
+                            self._swhid_path = swhid_path
+                            return swhid_path
+                        else:
+                            logger.debug(f"Ruby: PATH binary doesn't support snapshot, likely Rust binary")
+                    except Exception as e:
+                        logger.debug(f"Ruby: Exception checking PATH binary: {e}")
+        else:
+            swhid_path = shutil.which("swhid")
+            if swhid_path:
+                logger.debug(f"Ruby: Found swhid in PATH: {swhid_path}")
+                # Verify it supports snapshot (Ruby gem) vs not (Rust binary)
+                try:
+                    result = subprocess.run(
+                        [swhid_path, "snapshot", "--help"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0 or "snapshot" in result.stdout or "snapshot" in result.stderr:
+                        logger.info(f"Ruby: Found Ruby gem swhid in PATH: {swhid_path}")
+                        self._swhid_path = swhid_path
+                        return swhid_path
+                except Exception as e:
+                    logger.debug(f"Ruby: Exception checking PATH binary: {e}")
         
-        # Fallback: try to find swhid command in PATH (may be Rust binary)
-        swhid_path = shutil.which("swhid")
-        if swhid_path:
-            # Verify it supports snapshot (Ruby gem) vs not (Rust binary)
-            try:
-                result = subprocess.run(
-                    [swhid_path, "snapshot", "--help"],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                if result.returncode == 0 or "snapshot" in result.stdout or "snapshot" in result.stderr:
-                    self._swhid_path = swhid_path
-                    return swhid_path
-            except Exception:
-                pass
-        
+        logger.warning("Ruby: Could not find swhid binary in any location")
         return None
 
     def get_info(self) -> ImplementationInfo:
@@ -119,12 +248,25 @@ class Implementation(SwhidImplementation):
 
     def is_available(self) -> bool:
         """Check if Ruby implementation is available."""
+        logger.debug("Ruby: Checking availability")
         swhid_path = self._find_swhid_path()
         if not swhid_path:
+            logger.warning("Ruby: Implementation not available - swhid binary not found")
             return False
+        
+        logger.debug(f"Ruby: Testing binary at: {swhid_path}")
+        
+        # On Windows, prefer .bat file if we found the Unix script
+        is_windows = platform.system() == "Windows"
+        if is_windows and not swhid_path.endswith(('.bat', '.cmd', '.exe')):
+            bat_path = swhid_path + '.bat'
+            if os.path.isfile(bat_path):
+                logger.debug(f"Ruby: Using .bat wrapper on Windows: {bat_path}")
+                swhid_path = bat_path
         
         # Test that the command actually works
         try:
+            logger.debug(f"Ruby: Running test command: {swhid_path} help")
             result = subprocess.run(
                 [swhid_path, "help"],
                 capture_output=True,
@@ -133,8 +275,18 @@ class Implementation(SwhidImplementation):
                 errors='replace',
                 timeout=5
             )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, Exception):
+            logger.debug(f"Ruby: Test command result: returncode={result.returncode}, stdout={result.stdout[:100]}, stderr={result.stderr[:100]}")
+            if result.returncode == 0:
+                logger.info(f"Ruby: Implementation is available at: {swhid_path}")
+                return True
+            else:
+                logger.warning(f"Ruby: Test command failed with returncode {result.returncode}")
+                return False
+        except subprocess.TimeoutExpired:
+            logger.warning("Ruby: Test command timed out")
+            return False
+        except Exception as e:
+            logger.warning(f"Ruby: Exception testing binary: {e}")
             return False
 
     def get_capabilities(self) -> ImplementationCapabilities:

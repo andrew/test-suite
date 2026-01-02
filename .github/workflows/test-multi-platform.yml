@@ -422,6 +422,67 @@ jobs:
             gem install swhid --no-document || echo "Ruby implementation skip"
           fi
 
+      - name: Verify Ruby gem installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Ruby Gem Installation Verification ==="
+          echo "GEM_HOME: $GEM_HOME"
+          echo "GEM_PATH: $GEM_PATH"
+          echo ""
+          echo "=== Checking GEM_HOME/bin directory ==="
+          if [ -n "$GEM_HOME" ]; then
+            GEM_BIN_DIR="$GEM_HOME/bin"
+            echo "GEM_HOME/bin: $GEM_BIN_DIR"
+            if [ -d "$GEM_BIN_DIR" ]; then
+              echo "✅ Directory exists"
+              echo "Files in GEM_HOME/bin:"
+              ls -la "$GEM_BIN_DIR" || echo "Could not list directory"
+              echo ""
+              echo "=== Checking for swhid executables ==="
+              for ext in "" ".bat" ".cmd" ".exe"; do
+                SWHID_FILE="$GEM_BIN_DIR/swhid$ext"
+                if [ -f "$SWHID_FILE" ]; then
+                  echo "✅ Found: $SWHID_FILE"
+                  if [ "$RUNNER_OS" != "Windows" ]; then
+                    if [ -x "$SWHID_FILE" ]; then
+                      echo "   Executable: yes"
+                    else
+                      echo "   Executable: no"
+                    fi
+                  fi
+                else
+                  echo "❌ Not found: $SWHID_FILE"
+                fi
+              done
+            else
+              echo "❌ Directory does not exist: $GEM_BIN_DIR"
+            fi
+          else
+            echo "⚠️ GEM_HOME is not set"
+          fi
+          echo ""
+          echo "=== Checking PATH ==="
+          if command -v swhid >/dev/null 2>&1; then
+            echo "✅ swhid found in PATH: $(which swhid)"
+          else
+            echo "❌ swhid not found in PATH"
+          fi
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            if command -v swhid.bat >/dev/null 2>&1; then
+              echo "✅ swhid.bat found in PATH: $(which swhid.bat)"
+            else
+              echo "❌ swhid.bat not found in PATH"
+            fi
+          fi
+          echo ""
+          echo "=== Testing Ruby require ==="
+          if ruby -e "require 'swhid'" 2>&1; then
+            echo "✅ Ruby can require 'swhid'"
+          else
+            echo "❌ Ruby cannot require 'swhid'"
+          fi
+
       # Rust Build & Implementation Flags
       - name: Build swhid-rs with cache
         uses: ./.github/actions/build-swhid-rs
