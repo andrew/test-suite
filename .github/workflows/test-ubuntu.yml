@@ -64,7 +64,9 @@ jobs:
           # Use hardcoded /opt/hostedtoolcache for Ubuntu (this workflow only runs on Ubuntu)
           key: swhid-gem-${{ runner.os }}-ruby-3.2
           restore-keys: |
+            swhid-gem-${{ runner.os }}-ruby-3.2
             swhid-gem-${{ runner.os }}-ruby-3.2-
+            swhid-gem-${{ runner.os }}-
       
       - name: Determine CPU cores
         id: cpu-cores
