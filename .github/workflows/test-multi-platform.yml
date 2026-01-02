@@ -651,13 +651,63 @@ jobs:
           # Use /tmp/swhid-rs/target - works on all platforms with bash shell
           # Try workflow-specific cache first, then fall back to generic cache
           # This allows both workflows to share caches while avoiding save conflicts
+          # Note: Cache keys include commit hash from swhid-rs repo (format: key-<commit-hash>)
+          # Since we don't know the commit hash yet (repo not cloned), we use restore-keys
+          # restore-keys use prefix matching and return the most recently created cache
+          # The commit marker file inside the cache will validate if it matches current commit
           path: /tmp/swhid-rs/target
-          key: swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-multi-platform-workflow
+          # Use a key that won't match - restore-keys will find the most recent cache with matching prefix
+          # According to GitHub docs: if multiple caches match a restore-key, the most recently created is used
+          key: swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-multi-platform-workflow-${{ github.run_id }}-no-match
           restore-keys: |
-            swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-multi-platform-workflow
-            swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-ubuntu-workflow
-            swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable
+            swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-multi-platform-workflow-
+            swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-ubuntu-workflow-
+            swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-stable-
             swhid-rs-${{ runner.os == 'Linux' && 'Linux' || runner.os == 'macOS' && 'macOS' || 'Windows' }}-
+      
+      - name: Check cache restore status
+        shell: bash
+        run: |
+          echo "=== Cache restore status ==="
+          echo "cache-hit=${{ steps.cache-swhid-rs.outputs.cache-hit }}"
+          echo ""
+          
+          if [ "${{ steps.cache-swhid-rs.outputs.cache-hit }}" = "true" ]; then
+            echo "✅ Cache was restored (cache-hit=true)"
+          else
+            echo "❌ Cache was not restored (cache-hit=false or empty)"
+          fi
+          
+          echo ""
+          if [ -d /tmp/swhid-rs/target/release ] && [ -f /tmp/swhid-rs/target/release/swhid ]; then
+            CACHED_COMMIT_FILE="/tmp/swhid-rs/target/.swhid-rs-commit"
+            if [ -f "$CACHED_COMMIT_FILE" ]; then
+              CACHED_COMMIT=$(cat "$CACHED_COMMIT_FILE" 2>/dev/null || echo "unknown")
+              echo "✅ Found cached binary for commit ${CACHED_COMMIT:0:7}"
+              echo "Cached commit: $CACHED_COMMIT"
+            else
+              echo "⚠️ Found cached binary but no commit marker (will need validation)"
+            fi
+          else
+            echo "❌ No cached binary found in /tmp/swhid-rs/target/release"
+          fi
+        continue-on-error: true
+      
+      - name: Fix binary permissions after cache restore
+        shell: bash
+        run: |
+          echo "=== Ensuring binary is executable ==="
+          # When cache is restored, file permissions might not be preserved correctly
+          # Ensure the swhid binary is executable
+          if [ -f /tmp/swhid-rs/target/release/swhid ]; then
+            echo "Setting execute permissions on cached binary..."
+            chmod +x /tmp/swhid-rs/target/release/swhid
+            echo "✅ Binary permissions fixed"
+            ls -l /tmp/swhid-rs/target/release/swhid || true
+          else
+            echo "No binary found yet (will be built or permissions set during build)"
+          fi
+        continue-on-error: true
       
       - name: Setup SSH for private repository access (optional)
         shell: bash
@@ -792,6 +842,11 @@ jobs:
               BUILD_EXIT_CODE=${PIPESTATUS[0]}
                 if [ $BUILD_EXIT_CODE -eq 0 ]; then
                   REBUILT=true
+                  # Ensure binary is executable (Cargo should set this, but be explicit)
+                  if [ -f target/release/swhid ]; then
+                    chmod +x target/release/swhid
+                    echo "✅ Binary built and permissions set"
+                  fi
                   # Save the commit hash for future cache validation
                   # Ensure target directory exists and write commit marker
                   mkdir -p target
@@ -1061,120 +1116,125 @@ jobs:
           name: swhid-rs-target-${{ matrix.os_name }}
           path: /tmp/swhid-rs-cache
       
-      - name: Check artifact structure for ${{ matrix.os_name }}
+      - name: Reorganize artifacts to match cache path structure
         if: steps.download-artifacts.outcome == 'success'
         shell: bash
         run: |
-          echo "=== STEP 3: Checking artifact structure after download (${{ matrix.os_name }}) ==="
+          echo "=== STEP 3: Reorganizing artifacts to match cache path structure (${{ matrix.os_name }}) ==="
           echo ""
-          echo "Root directory contents:"
+          echo "Artifact was downloaded to /tmp/swhid-rs-cache"
+          echo "We need to reorganize it to /tmp/swhid-rs/target to match restore path"
+          echo ""
+          
+          # Create the target directory structure
+          mkdir -p /tmp/swhid-rs
+          
+          # Check what structure the artifact has
+          echo "Checking artifact structure:"
           ls -la /tmp/swhid-rs-cache/ || true
           
+          # The artifact might be:
+          # 1. /tmp/swhid-rs-cache/target/ (if directory structure preserved)
+          # 2. /tmp/swhid-rs-cache/ (if flattened - contains target contents directly)
+          
+          if [ -d /tmp/swhid-rs-cache/target ]; then
+            echo "Artifact has target/ subdirectory - moving to /tmp/swhid-rs/target"
+            mv /tmp/swhid-rs-cache/target /tmp/swhid-rs/target
+          elif [ -d /tmp/swhid-rs-cache/release ] || [ -f /tmp/swhid-rs-cache/.swhid-rs-commit ] || [ -f /tmp/swhid-rs-cache/swhid-rs-commit.txt ]; then
+            echo "Artifact is flattened - contents are directly in /tmp/swhid-rs-cache"
+            echo "Moving contents to /tmp/swhid-rs/target"
+            mv /tmp/swhid-rs-cache /tmp/swhid-rs/target
+          else
+            echo "⚠️ Warning: Unexpected artifact structure"
+            echo "Attempting to move /tmp/swhid-rs-cache to /tmp/swhid-rs/target"
+            mv /tmp/swhid-rs-cache /tmp/swhid-rs/target || true
+          fi
+          
           echo ""
-          echo "Searching for commit markers (hidden and non-hidden):"
-          find /tmp/swhid-rs-cache -type f \( -name ".swhid-rs-commit" -o -name "swhid-rs-commit.txt" \) 2>/dev/null | sort || echo "No commit markers found"
+          echo "Verifying final structure at /tmp/swhid-rs/target:"
+          ls -la /tmp/swhid-rs/target/ | head -20 || true
           
           echo ""
-          echo "Checking if markers exist at expected locations:"
-          if [ -f /tmp/swhid-rs-cache/.swhid-rs-commit ]; then
-            echo "✅ Found: /tmp/swhid-rs-cache/.swhid-rs-commit ($(cat /tmp/swhid-rs-cache/.swhid-rs-commit))"
-          else
-            echo "❌ Missing: /tmp/swhid-rs-cache/.swhid-rs-commit"
-          fi
-          
-          if [ -f /tmp/swhid-rs-cache/swhid-rs-commit.txt ]; then
-            echo "✅ Found: /tmp/swhid-rs-cache/swhid-rs-commit.txt ($(cat /tmp/swhid-rs-cache/swhid-rs-commit.txt))"
-          else
-            echo "❌ Missing: /tmp/swhid-rs-cache/swhid-rs-commit.txt"
-          fi
-          
-          if [ -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
-            echo "✅ Found: /tmp/swhid-rs-cache/target/.swhid-rs-commit ($(cat /tmp/swhid-rs-cache/target/.swhid-rs-commit))"
-          else
-            echo "❌ Missing: /tmp/swhid-rs-cache/target/.swhid-rs-commit"
-          fi
-          
-          if [ -f /tmp/swhid-rs-cache/target/swhid-rs-commit.txt ]; then
-            echo "✅ Found: /tmp/swhid-rs-cache/target/swhid-rs-commit.txt ($(cat /tmp/swhid-rs-cache/target/swhid-rs-commit.txt))"
-          else
-            echo "❌ Missing: /tmp/swhid-rs-cache/target/swhid-rs-commit.txt"
-          fi
-          
-          if [ -d /tmp/swhid-rs-cache/release ]; then
-            echo ""
-            echo "Release directory exists, checking for markers:"
-            if [ -f /tmp/swhid-rs-cache/release/.swhid-rs-commit ]; then
-              echo "✅ Found: /tmp/swhid-rs-cache/release/.swhid-rs-commit ($(cat /tmp/swhid-rs-cache/release/.swhid-rs-commit))"
-            else
-              echo "❌ Missing: /tmp/swhid-rs-cache/release/.swhid-rs-commit"
-            fi
-            
-            if [ -f /tmp/swhid-rs-cache/release/swhid-rs-commit.txt ]; then
-              echo "✅ Found: /tmp/swhid-rs-cache/release/swhid-rs-commit.txt ($(cat /tmp/swhid-rs-cache/release/swhid-rs-commit.txt))"
-            else
-              echo "❌ Missing: /tmp/swhid-rs-cache/release/swhid-rs-commit.txt"
-            fi
-          fi
+          echo "Searching for commit markers:"
+          find /tmp/swhid-rs/target -type f \( -name ".swhid-rs-commit" -o -name "swhid-rs-commit.txt" \) 2>/dev/null | sort || echo "No commit markers found"
           
           echo ""
           echo "Finding swhid binary:"
-          find /tmp/swhid-rs-cache -type f -name "swhid" | head -5 || true
+          find /tmp/swhid-rs/target -type f -name "swhid" | head -5 || true
         continue-on-error: true
       
       - name: Verify commit marker before cache save (${{ matrix.os_name }})
         if: steps.download-artifacts.outcome == 'success'
+        id: get-commit-hash
         shell: bash
         run: |
           echo "=== STEP 4: Verifying commit marker before cache save (${{ matrix.os_name }}) ==="
           
-          # Try to find the commit marker
+          # Try to find the commit marker in /tmp/swhid-rs/target (reorganized location)
           COMMIT_MARKER=""
-          if [ -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
-            COMMIT_MARKER="/tmp/swhid-rs-cache/target/.swhid-rs-commit"
-          elif [ -f /tmp/swhid-rs-cache/target/swhid-rs-commit.txt ]; then
-            COMMIT_MARKER="/tmp/swhid-rs-cache/target/swhid-rs-commit.txt"
-          elif [ -f /tmp/swhid-rs-cache/.swhid-rs-commit ]; then
-            COMMIT_MARKER="/tmp/swhid-rs-cache/.swhid-rs-commit"
-          elif [ -f /tmp/swhid-rs-cache/swhid-rs-commit.txt ]; then
-            COMMIT_MARKER="/tmp/swhid-rs-cache/swhid-rs-commit.txt"
-          elif [ -f /tmp/swhid-rs-cache/release/.swhid-rs-commit ]; then
-            COMMIT_MARKER="/tmp/swhid-rs-cache/release/.swhid-rs-commit"
-          elif [ -f /tmp/swhid-rs-cache/release/swhid-rs-commit.txt ]; then
-            COMMIT_MARKER="/tmp/swhid-rs-cache/release/swhid-rs-commit.txt"
+          if [ -f /tmp/swhid-rs/target/.swhid-rs-commit ]; then
+            COMMIT_MARKER="/tmp/swhid-rs/target/.swhid-rs-commit"
+          elif [ -f /tmp/swhid-rs/target/swhid-rs-commit.txt ]; then
+            COMMIT_MARKER="/tmp/swhid-rs/target/swhid-rs-commit.txt"
+          elif [ -f /tmp/swhid-rs/target/release/.swhid-rs-commit ]; then
+            COMMIT_MARKER="/tmp/swhid-rs/target/release/.swhid-rs-commit"
+          elif [ -f /tmp/swhid-rs/target/release/swhid-rs-commit.txt ]; then
+            COMMIT_MARKER="/tmp/swhid-rs/target/release/swhid-rs-commit.txt"
           fi
           
           if [ -n "$COMMIT_MARKER" ]; then
+            COMMIT_HASH=$(cat "$COMMIT_MARKER" | tr -d '[:space:]')
             echo "✅ Commit marker found at: $COMMIT_MARKER"
-            echo "Commit hash: $(cat "$COMMIT_MARKER")"
+            echo "Commit hash: $COMMIT_HASH"
+            echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
             
             # Ensure it's in the expected location for cache
-            if [ ! -f /tmp/swhid-rs-cache/target/.swhid-rs-commit ]; then
+            if [ ! -f /tmp/swhid-rs/target/.swhid-rs-commit ]; then
               echo "Creating .swhid-rs-commit in target directory from found marker..."
-              mkdir -p /tmp/swhid-rs-cache/target
-              cp "$COMMIT_MARKER" /tmp/swhid-rs-cache/target/.swhid-rs-commit
-              echo "Created: $(cat /tmp/swhid-rs-cache/target/.swhid-rs-commit)"
+              mkdir -p /tmp/swhid-rs/target
+              cp "$COMMIT_MARKER" /tmp/swhid-rs/target/.swhid-rs-commit
+              echo "Created: $(cat /tmp/swhid-rs/target/.swhid-rs-commit)"
             fi
           else
             echo "⚠️ WARNING: No commit marker found in artifact!"
             echo "This may cause cache validation issues."
+            # Use a fallback: workflow run ID to make key unique
+            echo "commit_hash=${{ github.run_id }}" >> $GITHUB_OUTPUT
           fi
         continue-on-error: true
       
       - name: Save swhid-rs build cache for ${{ matrix.os_name }}
-        if: steps.download-artifacts.outcome == 'success'
+        if: steps.download-artifacts.outcome == 'success' && steps.get-commit-hash.outcome == 'success'
         uses: actions/cache/save@v4
         continue-on-error: true
         with:
-          # The artifact contains /tmp/swhid-rs/target, so when downloaded it may be at
-          # /tmp/swhid-rs-cache/target or /tmp/swhid-rs-cache depending on artifact structure
-          # Try both paths - cache action will use whichever exists
-          path: |
-            /tmp/swhid-rs-cache/target
-            /tmp/swhid-rs-cache
-          # Use workflow-specific cache key to avoid conflicts when multiple workflows run simultaneously
-          # Both workflows can save their own cache, and both can restore from either cache
-          # This eliminates race conditions across workflows
-          key: swhid-rs-${{ matrix.os_name }}-stable-multi-platform-workflow
+          # CRITICAL: Use the same path as restore step to avoid cache version mismatch
+          # Restore uses: /tmp/swhid-rs/target
+          # Save must use: /tmp/swhid-rs/target (exact same path)
+          # GitHub Actions caches are scoped by path - different paths = different cache versions
+          path: /tmp/swhid-rs/target
+          # Include commit hash in cache key - each commit gets its own cache
+          # This allows multiple commits to have caches simultaneously
+          # restore-keys with prefix matching will find the most recent cache
+          # NOTE: GitHub Actions caches are IMMUTABLE - once created, they cannot be overwritten.
+          # If a cache with this exact key already exists, the save will fail with "Unable to reserve cache".
+          # This is expected and harmless (continue-on-error handles it) - it means we already have this cache.
+          key: swhid-rs-${{ matrix.os_name }}-stable-multi-platform-workflow-${{ steps.get-commit-hash.outputs.commit_hash }}
+      
+      - name: Debug cache save result (${{ matrix.os_name }})
+        if: steps.download-artifacts.outcome == 'success' && steps.get-commit-hash.outcome == 'success'
+        shell: bash
+        run: |
+          echo "Cache save completed (check logs above for any errors)"
+          echo "Cache key used: swhid-rs-${{ matrix.os_name }}-stable-multi-platform-workflow-${{ steps.get-commit-hash.outputs.commit_hash }}"
+          echo "Cache path: /tmp/swhid-rs/target"
+          if [ -d /tmp/swhid-rs/target ]; then
+            echo "✅ Target directory exists and will be cached"
+            du -sh /tmp/swhid-rs/target || true
+          else
+            echo "❌ Target directory does not exist"
+          fi
+        continue-on-error: true
 
 
   publish-dashboard:
