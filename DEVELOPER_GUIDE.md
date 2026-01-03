@@ -30,6 +30,14 @@ export PATH="$HOME/.gem/ruby/$(ruby -e 'puts RUBY_VERSION.split(".")[0..1].join(
 **Rust Implementation:**
 - Requires Rust toolchain (installed automatically in CI)
 - For local development, install via: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Setting up swhid-rs locally:**
+  1. Clone the swhid-rs repository: `git clone https://github.com/swhid/swhid-rs.git`
+  2. Build the binary: `cd swhid-rs && cargo build --release`
+  3. Set `SWHID_RS_PATH` environment variable to point to the binary:
+     - To binary file: `export SWHID_RS_PATH=/path/to/swhid-rs/target/release/swhid`
+     - To binary directory: `export SWHID_RS_PATH=/path/to/swhid-rs/target/release`
+     - To project root: `export SWHID_RS_PATH=/path/to/swhid-rs` (will auto-detect target/release/swhid)
+  4. Alternatively, add the binary to your PATH: `export PATH=/path/to/swhid-rs/target/release:$PATH`
 
 **Python Implementations:**
 - Python implementations are included automatically
