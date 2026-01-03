@@ -79,6 +79,8 @@ These implementations are wrappers around Git's hashing algorithm and should alw
 
 - **[Implementation Guide](IMPLEMENTATIONS.md)** - Comprehensive overview of all SWHID implementations, their technology stack, features, and limitations
 - **[Developer Guide](DEVELOPER_GUIDE.md)** - Complete guide for running tests and adding implementations
+- **[Architecture](docs/architecture.md)** - System architecture, component design, and data flow
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues, solutions, and debugging tips
 
 ## Testing
 
