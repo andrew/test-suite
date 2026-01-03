@@ -12,6 +12,7 @@ import logging
 from typing import Optional
 
 from harness.plugins.base import SwhidImplementation, ImplementationInfo, ImplementationCapabilities
+from harness.utils.permissions import get_source_permissions, create_git_repo_with_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -427,180 +428,45 @@ class Implementation(SwhidImplementation):
         """Ensure file permissions are preserved for external tools.
         
         On Windows, files lose executable bits when copied. This method creates
-        a temporary copy with correct permissions set, which external tools
-        (like the Ruby swhid gem) can read correctly.
+        a temporary Git repository with permissions set in the Git index,
+        which the Ruby swhid tool can read from the Git index.
         
         Args:
             source_path: Path to source file or directory
-        
+            
         Returns:
-            Path to use (may be temporary copy on Windows, or original on Unix)
+            Path to use (may be temporary Git repo on Windows, or original on Unix)
         """
-        import stat
         import tempfile
-        import shutil
         import platform
         
         # On Unix-like systems, permissions are usually preserved
-        # Only create temp copy on Windows
+        # Only create temp Git repo on Windows
         if platform.system() != 'Windows':
             return source_path
         
-        # Read source permissions
-        # On Windows, check Git index first as filesystem may not preserve executable bits
-        source_permissions = {}
+        # Read source permissions using shared utility
+        source_permissions = get_source_permissions(source_path)
         
-        # On Windows, try to read permissions from Git index first
-        # This is more reliable than filesystem permissions
-        try:
-            # Get absolute path to source_path
-            abs_source_path = os.path.abspath(source_path)
-            # Get repository root (walk up to find .git)
-            repo_root = abs_source_path
-            if os.path.isdir(repo_root):
-                check_path = repo_root
-            else:
-                check_path = os.path.dirname(repo_root)
-            
-            while check_path != os.path.dirname(check_path):
-                if os.path.exists(os.path.join(check_path, '.git')):
-                    repo_root = check_path
-                    break
-                check_path = os.path.dirname(check_path)
-            else:
-                repo_root = None
-            
-            # If we found a repo, check Git index for permissions
-            if repo_root:
-                if os.path.isdir(source_path):
-                    for root, dirs, files in os.walk(source_path):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            rel_path = os.path.relpath(file_path, source_path)
-                            # Normalize path separators to forward slashes for cross-platform consistency
-                            rel_path = rel_path.replace(os.sep, '/')
-                            
-                            # Get path relative to repo root
-                            try:
-                                repo_rel_path = os.path.relpath(file_path, repo_root)
-                                # Normalize for Git command (Git uses forward slashes)
-                                repo_rel_path = repo_rel_path.replace(os.sep, '/')
-                                # Check Git index
-                                result = subprocess.run(
-                                    ['git', 'ls-files', '--stage', repo_rel_path],
-                                    cwd=repo_root,
-                                    capture_output=True,
-                                    text=True,
-                                    encoding='utf-8',
-                                    errors='replace',
-                                    timeout=2
-                                )
-                                if result.returncode == 0 and result.stdout.strip():
-                                    # Format: <mode> <sha> <stage> <path>
-                                    parts = result.stdout.strip().split()
-                                    if parts:
-                                        git_mode = parts[0]
-                                        # Mode is octal string, e.g., '100755' for executable
-                                        is_executable = git_mode.endswith('755')
-                                        source_permissions[rel_path] = is_executable
-                                        continue
-                            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError):
-                                pass
-                elif os.path.isfile(source_path):
-                    try:
-                        repo_rel_path = os.path.relpath(source_path, repo_root)
-                        result = subprocess.run(
-                            ['git', 'ls-files', '--stage', repo_rel_path],
-                            cwd=repo_root,
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            timeout=2
-                        )
-                        if result.returncode == 0 and result.stdout.strip():
-                            parts = result.stdout.strip().split()
-                            if parts:
-                                git_mode = parts[0]
-                                is_executable = git_mode.endswith('755')
-                                source_permissions['.'] = is_executable
-                    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError):
-                        pass
-        except Exception:
-            # If Git check fails, fall back to filesystem
-            pass
-        
-        # Fall back to filesystem permissions (works on Unix, or if Git check failed)
-        if os.path.isdir(source_path):
-            for root, dirs, files in os.walk(source_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(file_path, source_path)
-                    # Normalize path separators to forward slashes for cross-platform consistency
-                    rel_path = rel_path.replace(os.sep, '/')
-                    
-                    # Skip if we already got permission from Git index
-                    if rel_path in source_permissions:
-                        continue
-                    
-                    try:
-                        stat_info = os.stat(file_path)
-                        is_executable = bool(stat_info.st_mode & stat.S_IEXEC)
-                        source_permissions[rel_path] = is_executable
-                    except OSError:
-                        source_permissions[rel_path] = False
-        elif os.path.isfile(source_path):
-            # Skip if we already got permission from Git index
-            if '.' not in source_permissions:
-                try:
-                    stat_info = os.stat(source_path)
-                    is_executable = bool(stat_info.st_mode & stat.S_IEXEC)
-                    source_permissions['.'] = is_executable  # Single file, use '.' as key
-                except OSError:
-                    source_permissions['.'] = False
-        
-        # If no executable files found, no need for temp copy
+        # If no executable files found, no need for temp repo
         if not any(source_permissions.values()):
             return source_path
         
-        # Create temporary copy with permissions
+        # Create temporary Git repository with permissions set in index
         temp_dir = tempfile.mkdtemp(prefix="swhid-ruby-")
         self._temp_dirs.append(temp_dir)
         
-        if os.path.isdir(source_path):
-            # Copy directory
-            temp_path = os.path.join(temp_dir, os.path.basename(source_path) or "dir")
-            shutil.copytree(source_path, temp_path, symlinks=True)
-            
-            # Apply permissions
-            for rel_path, is_executable in source_permissions.items():
-                target_file = os.path.join(temp_path, rel_path)
-                if os.path.exists(target_file):
-                    try:
-                        current_stat = os.stat(target_file)
-                        if is_executable:
-                            os.chmod(target_file, current_stat.st_mode | stat.S_IEXEC)
-                        else:
-                            os.chmod(target_file, current_stat.st_mode & ~stat.S_IEXEC)
-                    except OSError:
-                        # On Windows, chmod might not work - that's okay
-                        pass
-            
-            return temp_path
+        # Use shared utility to create Git repo with permissions
+        target_path, success = create_git_repo_with_permissions(
+            source_path, source_permissions, temp_dir, target_subdir="target"
+        )
+        
+        if success:
+            # Return the target subdirectory path - Ruby tool will read from Git index
+            return target_path
         else:
-            # Copy single file
-            temp_path = os.path.join(temp_dir, os.path.basename(source_path))
-            shutil.copy2(source_path, temp_path)
-            
-            # Apply permission
-            if source_permissions.get('.', False):
-                try:
-                    current_stat = os.stat(temp_path)
-                    os.chmod(temp_path, current_stat.st_mode | stat.S_IEXEC)
-                except OSError:
-                    pass
-            
-            return temp_path
+            # Fallback to original path if Git repo creation failed
+            return source_path
     
     def _cleanup_temp_dirs(self):
         """Clean up temporary directories created for permission preservation."""
