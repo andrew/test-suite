@@ -1398,42 +1398,61 @@ def main():
         # Generate canonical results
         canonical_results = harness.get_canonical_results(results, args.branch, args.commit)
         
+        # Default behavior: write to results directory if no output specified
+        # This maintains compatibility with original swhid-harness behavior
+        # Always write output file first (before summary) to ensure it's created even if there are errors
         if args.summary_only:
             harness._print_summary(canonical_results)
         elif args.dashboard_output:
-            if args.output_format == "ndjson":
-                # Write NDJSON format (one JSON object per line)
-                with open(args.dashboard_output, 'w') as f:
-                    # Write run info
-                    f.write(json.dumps({"type": "run_info", **canonical_results.run.model_dump(mode="json")}) + "\n")
-                    # Write implementations
-                    for impl in canonical_results.implementations:
-                        f.write(json.dumps({"type": "implementation", **impl.model_dump(mode="json")}) + "\n")
-                    # Write test cases
-                    for test in canonical_results.tests:
-                        f.write(json.dumps({"type": "test_case", **test.model_dump(mode="json")}) + "\n")
-                    # Write aggregates
-                    f.write(json.dumps({"type": "aggregates", **canonical_results.aggregates.model_dump(mode="json")}) + "\n")
-                print(f"NDJSON results saved to {args.dashboard_output}")
-            else:
-                # Write canonical JSON format
-                with open(args.dashboard_output, 'w') as f:
-                    json.dump(canonical_results.model_dump(mode="json"), f, indent=2)
-                print(f"Canonical results saved to {args.dashboard_output}")
+            # Write to specified file
+            try:
+                if args.output_format == "ndjson":
+                    # Write NDJSON format (one JSON object per line)
+                    with open(args.dashboard_output, 'w') as f:
+                        # Write run info
+                        f.write(json.dumps({"type": "run_info", **canonical_results.run.model_dump(mode="json")}) + "\n")
+                        # Write implementations
+                        for impl in canonical_results.implementations:
+                            f.write(json.dumps({"type": "implementation", **impl.model_dump(mode="json")}) + "\n")
+                        # Write test cases
+                        for test in canonical_results.tests:
+                            f.write(json.dumps({"type": "test_case", **test.model_dump(mode="json")}) + "\n")
+                        # Write aggregates
+                        f.write(json.dumps({"type": "aggregates", **canonical_results.aggregates.model_dump(mode="json")}) + "\n")
+                    print(f"NDJSON results saved to {args.dashboard_output}")
+                else:
+                    # Write canonical JSON format
+                    with open(args.dashboard_output, 'w') as f:
+                        json.dump(canonical_results.model_dump(mode="json"), f, indent=2)
+                    print(f"Canonical results saved to {args.dashboard_output}")
+            except Exception as e:
+                logger.error(f"Failed to write results to {args.dashboard_output}: {e}")
+                raise
             
             # Always show summary when saving to file
             harness._print_summary(canonical_results)
         else:
+            # Default: write to results directory (original behavior)
+            # Generate filename with timestamp
+            run_id = canonical_results.run.id
             if args.output_format == "ndjson":
-                # Print NDJSON to stdout
-                print(json.dumps({"type": "run_info", **canonical_results.run.model_dump(mode="json")}))
-                for impl in canonical_results.implementations:
-                    print(json.dumps({"type": "implementation", **impl.model_dump(mode="json")}))
-                for test in canonical_results.tests:
-                    print(json.dumps({"type": "test_case", **test.model_dump(mode="json")}))
-                print(json.dumps({"type": "aggregates", **canonical_results.aggregates.model_dump(mode="json")}))
+                output_path = harness.results_dir / f"results_{run_id}.ndjson"
+                with open(output_path, 'w') as f:
+                    f.write(json.dumps({"type": "run_info", **canonical_results.run.model_dump(mode="json")}) + "\n")
+                    for impl in canonical_results.implementations:
+                        f.write(json.dumps({"type": "implementation", **impl.model_dump(mode="json")}) + "\n")
+                    for test in canonical_results.tests:
+                        f.write(json.dumps({"type": "test_case", **test.model_dump(mode="json")}) + "\n")
+                    f.write(json.dumps({"type": "aggregates", **canonical_results.aggregates.model_dump(mode="json")}) + "\n")
+                print(f"NDJSON results saved to {output_path}")
             else:
-                print(json.dumps(canonical_results.model_dump(mode="json"), indent=2))
+                output_path = harness.results_dir / f"results_{run_id}.json"
+                with open(output_path, 'w') as f:
+                    json.dump(canonical_results.model_dump(mode="json"), f, indent=2)
+                print(f"Canonical results saved to {output_path}")
+            
+            # Always show summary
+            harness._print_summary(canonical_results)
         
         # Exit code: 0=all pass, 1=mismatch, 2=error
         failed = sum(1 for r in results if not r.all_match)
