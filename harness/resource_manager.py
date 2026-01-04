@@ -52,9 +52,23 @@ class ResourceManager:
         self._temp_dirs.append(temp_dir)
         
         # Extract tarball
+        # Use filter='data' to prevent path traversal attacks (Tar Slip vulnerability)
+        # This ensures extracted paths stay within the destination directory
         logger.debug(f"Extracting {payload_path} to {temp_dir}")
         with tarfile.open(payload_path, "r:gz") as tar:
-            tar.extractall(temp_dir)
+            # filter='data' prevents path traversal attacks (available in Python 3.12+)
+            # For older Python versions, we manually validate paths
+            try:
+                tar.extractall(temp_dir, filter='data')
+            except TypeError:
+                # Python < 3.12 doesn't support filter parameter
+                # Manually validate paths to prevent path traversal
+                for member in tar.getmembers():
+                    # Resolve the full path and ensure it's within temp_dir
+                    member_path = os.path.normpath(os.path.join(temp_dir, member.name))
+                    if not member_path.startswith(os.path.abspath(temp_dir) + os.sep):
+                        raise ValueError(f"Path traversal detected: {member.name}")
+                    tar.extract(member, temp_dir)
         
         # Find the extracted directory (should be the first directory in the tarball)
         extracted_items = os.listdir(temp_dir)

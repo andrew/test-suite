@@ -1,0 +1,57 @@
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "swhid"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Group updates for better PR management
+    groups:
+      production-dependencies:
+        patterns:
+          - "PyYAML"
+          - "pydantic"
+          - "psutil"
+          - "dulwich"
+          - "pygit2"
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "pytest-*"
+    # Ignore major version updates for critical dependencies (can be reviewed manually)
+    ignore:
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pygit2"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "swhid"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
